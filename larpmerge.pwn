@@ -37,7 +37,7 @@
 new MySQL:conn;
 
 //DEFINE
-#include <ProjectInc/declare>
+#include <ProjectInc\declare>
 
 #define DIALOG_REG 1
 #define DIALOG_LOGIN 2
@@ -48,7 +48,7 @@ new MySQL:conn;
 #define MAX_BIZ 7 //
 #define MAX_SBIZ 13 //
 //==============================
-#define strcpy(%1,%2,%3) strmid(%1,%2,0,%3,strlen(%2)+1)
+//#define strcpy(%1,%2,%3) strmid(%1,%2,0,%3,strlen(%2)+1)
 #define dcmd(%1,%2,%3) if ((strcmp((%3)[1], #%1, true, (%2)) == 0) && ((((%3)[(%2) + 1] == 0) && (dcmd_%1(playerid, "")))||(((%3)[(%2) + 1] == 32) && (dcmd_%1(playerid, (%3)[(%2) + 2]))))) return 1
 #pragma semicolon 0
 #define MAX_TRUNK_SLOTS		(5) // Is actually 4.
@@ -422,8 +422,8 @@ new license_pu3;
 new license_pu4;
 new license_pu5;*/
 new Security = 0;
-new gPlayerUsingLoopingAnim[MAX_PLAYERS];
-new Text:txtAnimHelper;
+//new gPlayerUsingLoopingAnim[MAX_PLAYERS];
+//new Text:txtAnimHelper;
 new CreatedCars[100];
 //new CreatedCar = 0;
 new Tax = 0;
@@ -1867,7 +1867,7 @@ main()
 	print("\n");
 }
 
-#include <ProjectInc/onevent>
+#include <ProjectInc\onevent>
 
 //CONNECTMYSQL
 forward ConnectMySQL();
@@ -3234,12 +3234,12 @@ public DollahScoreUpdate()
 	return 1;
 }
 
-LoopingAnim(playerid,animlib[],animname[], Float:Speed, looping, lockx, locky, lockz, lp)
-{
-    gPlayerUsingLoopingAnim[playerid] = 1;
-    ApplyAnimation(playerid, animlib, animname, Speed, looping, lockx, locky, lockz, lp);
-    TextDrawShowForPlayer(playerid,txtAnimHelper);
-}
+//LoopingAnim(playerid,animlib[],animname[], Float:Speed, looping, lockx, locky, lockz, lp)
+//{
+//    gPlayerUsingLoopingAnim[playerid] = 1;
+//    ApplyAnimation(playerid, animlib, animname, Speed, looping, lockx, locky, lockz, lp);
+//    TextDrawShowForPlayer(playerid,txtAnimHelper);
+//}
 
 public Encrypt(string[])
 {
@@ -10055,9 +10055,65 @@ public SendAdminMessage(color, string[])
 	}
 }
 
-#include <ProjectInc/ben>
-#include <ProjectInc/geek>
+#include <ProjectInc\ben>
+#include <ProjectInc\geek>
+
+#include <ProjectInc\ontimer>
 //../pawno/include/ProjectInc/ben.inc TM
+forward TazerKeyStateChange(playerid, newkeys, oldkeys);
+public TazerKeyStateChange(playerid, newkeys, oldkeys)
+{
+	if (newkeys & KEY_FIRE && Tazering[playerid] == 1)
+	{
+		ApplyAnimation(playerid, "KNIFE", "knife_3", 4.1, 0, 1, 1, 0, 0, 1);
+		for (new i = 0; i<MAX_PLAYERS; i++)
+		{
+			if (PlayerInfo[i][pMember] == 1 || PlayerInfo[i][pLeader] == 1) continue;
+			if (IsPlayerNearPlayer(playerid, i, 2) && i != playerid && Tazered[i] == 0)
+			{
+				Tazered[i] = 15;
+				TogglePlayerControllable(i, 0);
+				ApplyAnimation(i, "KNIFE", "knife_hit_3", 4.1, 0, 1, 1, 1, 0, 1);
+				SetTimerEx("TazeredCollapse", 1000, 0, "i", i);
+			}
+		}
+	}
+	if (newkeys & KEY_HANDBRAKE && !IsPlayerInAnyVehicle(playerid) && GetPlayerWeapon(playerid) == 0)
+	{
+		if (WearTazer[playerid] == 1)
+		{
+			if (Tazering[playerid] == 0)
+			{
+				Tazering[playerid] = 1;
+				SetPlayerAttachedObject(playerid, 5, 18642, 6, 0.06, 0.01, 0.08, 180.0, 0.0, 0.0);
+			}
+			else if (Tazering[playerid] == 1)
+			{
+				Tazering[playerid] = 0;
+				SetPlayerAttachedObject(playerid, 5, 18642, 1, -0.197000, -0.071000, -0.109999, 2.399994, 80.400001, 18.399993, 1.000000, 1.000000, 1.000000, 0, 0);
+			}
+		}
+	}
+}
+
+forward TazeredCollapse(playerid);
+public TazeredCollapse(playerid)
+{
+	ApplyAnimation(playerid, "CRACK", "crckdeth2", 4.0, 1, 0, 0, 1, 0, 1);
+	return 1;
+}
+
+stock IsPlayerNearPlayer(playerid, targetid, Float:radius)
+{
+	new Float:x, Float:y, Float:z;
+	GetPlayerPos(targetid, x, y, z);
+	if (IsPlayerInRangeOfPoint(playerid, radius, x, y, z))
+	{
+		return 1;
+	}
+	return 0;
+}
+
 forward OnPIDUpdate(playerid);
 public OnPIDUpdate(playerid)
 {
@@ -10128,7 +10184,7 @@ CMD:veh(playerid, params[])
 				 return 1;
 			 }
 		 }
-		 format(string, sizeof(string), "[Admin] %s da tao mot Admin Vehicle ID %d.", GLN(playerid), id);
+		 format(string, sizeof(string), "AdmCMD: %s da tao mot Admin Vehicle ID %d.", GLN(playerid), id);
 		 SendAdminMessage(COLOR_LIGHTRED, string);
 		 return 1;
 }
@@ -10156,7 +10212,7 @@ CMD:xoaveh(playerid, params[])
 				 if (avid != -1 && !IsAnyAdminInVehicle(i))
 					 DeleteAdminVeh(avid);
 			 }
-			 SendAdminMessage(COLOR_LIGHTRED, "[Admin] Da xoa tat ca Admin Vehicle!");
+			 SendAdminMessage(COLOR_LIGHTRED, "AdmCMD: Da xoa tat ca Admin Vehicle!");
 			 return 1;
 		 }
 		new vid = strval(vidid);
@@ -10166,7 +10222,7 @@ CMD:xoaveh(playerid, params[])
 			if (avid != -1)
 			{
 				DeleteAdminVeh(avid);
-				SCM(playerid, COLOR_LIGHTRED, "[Admin] Da xoa chiec Admin Vehicle nay thanh cong!");
+				SCM(playerid, COLOR_LIGHTRED, "AdmCMD: Da xoa chiec Admin Vehicle nay thanh cong!");
 				return 1;
 			}
 			else SCM(playerid, COLOR_GREY, "Day khong phai Admin Vehicle.");
@@ -10181,16 +10237,336 @@ stock DeleteAdminVeh(avid)
 	new vid = aVeh[avid];
 	DestroyVehicle(vid);
 	aVeh[avid] = 0;
-	aVehLabel[avid] = -1;
 }
 //../pawno/include/ProjectInc/declare.inc TM
+#include <YSI\y_timers>
+#include <foreach>
+
 #define MAXCUSTOMVEH 50
 new aVeh[MAXCUSTOMVEH];
 new Text3D:aVehLabel[MAXCUSTOMVEH];
+
+new Tazering[MAX_PLAYERS];
+new WearTazer[MAX_PLAYERS];
+new Tazered[MAX_PLAYERS];
 //../pawno/include/ProjectInc/geek.inc TM
 CMD:w(playerid, params[])
 {
 	return cmd_whisper(playerid, params);
+}
+CMD:goto(playerid, params[])
+{
+	if (PlayerInfo[playerid][pAdmin] < 1) return SendClientMessage(playerid, COLOR_GRAD1, "Khong co quyen han su dung cau lenh nay.");
+	if (sscanf(params, "s[32]", params))
+	{
+		SendClientMessage(playerid, COLOR_WHITE, "Su dung: /goto [Dia diem/PlayerId]");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: LS | LV | SF");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: Truck | Congnhan | Dongo | Nongdan");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: Tosser | Nhamay | Binco | 247");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: AllSaints | County | Wangcar");
+		return 1;
+	}
+	new xe = GetPlayerVehicleID(playerid), str[255];
+	if (!strcmp(params, "ls", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 1529.6, -1691.2, 13.3);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 1529.6, -1691.2, 13.3);
+	}
+	else if (!strcmp(params, "lv", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 1699.2, 1435.1, 10.7);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 1699.2, 1435.1, 10.7);
+	}
+	else if (!strcmp(params, "sf", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, -2015.261108, 154.379516, 27.687500);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, -2015.261108, 154.379516, 27.687500);
+		SendClientMessage(playerid, COLOR_GRAD1, "   Da duoc dich chuyen !");
+		return 1;
+	}
+	//else if (!strcmp(params, "dd", true))
+	//{
+	//	if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, DiemDenPos[playerid][0], DiemDenPos[playerid][1], DiemDenPos[playerid][2] + 3);
+	//	SetPlayerPos(playerid, DiemDenPos[playerid][0], DiemDenPos[playerid][1], DiemDenPos[playerid][2] + 3);
+	//}
+	else if (!strcmp(params, "truck", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 2187.2886, -2265.1406, 13.4754);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 2187.2886, -2265.1406, 13.4754);
+	}
+	else if (!strcmp(params, "congnhan", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 2461.0278, -2115.2649, 13.5469);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 2461.0278, -2115.2649, 13.5469);
+	}
+	else if (!strcmp(params, "binco", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 2245.4258, -1662.2477, 15.4690);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 2245.4258, -1662.2477, 15.4690);
+	}
+	else if (!strcmp(params, "247", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 1932.0830, -1776.4635, 13.3828);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 1932.0830, -1776.4635, 13.3828);
+	}
+	else if (!strcmp(params, "wangcar", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 1790.7096, -1739.4459, 13.5469);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 1790.7096, -1739.4459, 13.5469);
+	}
+	else if (!strcmp(params, "county", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 2026.7938, -1422.0918, 16.9922);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 2026.7938, -1422.0918, 16.9922);
+	}
+	else if (!strcmp(params, "allsaints", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 1177.5790, -1323.5640, 14.0777);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 1177.5790, -1323.5640, 14.0777);
+	}
+	else if (!strcmp(params, "nongdan", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, -374.0205, -1439.1160, 25.7266);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, -374.0205, -1439.1160, 25.7266);
+	}
+	else if (!strcmp(params, "dongo", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, -534.1697, -83.0436, 62.8426);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, -534.1697, -83.0436, 62.8426);
+	}
+	else if (!strcmp(params, "nhamay", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 39.5153, -287.3114, 2.0165);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 39.5153, -287.3114, 2.0165);
+	}
+	else if (!strcmp(params, "tosser", true))
+	{
+		if (IsPlayerInAnyVehicle(playerid)) return SetVehiclePos(xe, 681.5443, -476.8310, 16.3359);
+		SetPlayerInterior(playerid, 0);
+		SetPlayerVirtualWorld(playerid, 0);
+		SetPlayerPos(playerid, 681.5443, -476.8310, 16.3359);
+	}
+	else if (IsNumeric(params))
+	{
+		new plo = strval(params);
+		if (!IsPlayerConnected(plo) && plo == INVALID_PLAYER_ID)
+		{
+			format(str, sizeof(str), "   %d , nguoi choi khong hop le.", plo);
+			SendClientMessage(playerid, COLOR_GRAD1, str);
+		}
+		new Float:plocx, Float: plocy, Float: plocz;
+		if (Spectate[playerid] != 255)
+		{
+			Spectate[playerid] = 256;
+		}
+		GetPlayerPos(plo, plocx, plocy, plocz);
+		if (PlayerInfo[plo][pInt] > 0)
+		{
+			SetPlayerInterior(playerid, PlayerInfo[plo][pInt]);
+			PlayerInfo[playerid][pInt] = PlayerInfo[plo][pInt];
+			PlayerInfo[playerid][pLocal] = PlayerInfo[plo][pLocal];
+		}
+		if (PlayerInfo[playerid][pInt] == 0)
+		{
+			SetPlayerInterior(playerid, 0);
+		}
+		if (plocz > 530.0 && PlayerInfo[plo][pInt] == 0) //the highest land point in sa = 526.8
+		{
+			SetPlayerInterior(playerid, 1);
+			PlayerInfo[playerid][pInt] = 1;
+		}
+		if (GetPlayerState(playerid) == 2)
+		{
+			new tmpcar = GetPlayerVehicleID(playerid);
+			SetVehiclePos(tmpcar, plocx, plocy + 4, plocz);
+			TelePos[playerid][0] = 0.0; TelePos[playerid][1] = 0.0;
+		}
+		else
+		{
+			SetPlayerPos(playerid, plocx, plocy + 2, plocz);
+		}
+		PlayerInfo[playerid][pVirWorld] = GetPlayerVirtualWorld(plo);
+		SetPlayerVirtualWorld(playerid, PlayerInfo[playerid][pVirWorld]);
+	}
+	else {
+		return SendClientMessage(playerid, COLOR_GRAD1, "   Sai [Dia diem] hoac [Playerid] !");
+	}
+	SendClientMessage(playerid, COLOR_GRAD1, "   Da duoc dich chuyen !");
+	return 1;
+}
+
+CMD:sendto(playerid, params[])
+{
+	if (PlayerInfo[playerid][pAdmin] < 1) return SendClientMessage(playerid, COLOR_GRAD1, "Khong co quyen han su dung cau lenh nay.");
+	new nguoichoi, location[32];
+	if (sscanf(params, "us[32]", nguoichoi, location))
+	{
+		SendClientMessage(playerid, COLOR_WHITE, "Su dung: /sendto [ID] [Dia diem]");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: LS | LV | SF");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: Truck | Congnhan | Dongo | Nongdan");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: Tosser | Nhamay | Binco | 247");
+		SendClientMessage(playerid, COLOR_GREY, "Dia diem: AllSaints | County | Wangcar");
+		return 1;
+	}
+	if (!IsPlayerConnected(playerid)) return SendClientMessage(playerid, COLOR_GRAD1, "ID khong hop le.");
+	new xe = GetPlayerVehicleID(nguoichoi), str[255];
+	if (!strcmp(location, "ls", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 1529.6, -1691.2, 13.3);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 1529.6, -1691.2, 13.3);
+	}
+	else if (!strcmp(location, "lv", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 1699.2, 1435.1, 10.7);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 1699.2, 1435.1, 10.7);
+		return 1;
+	}
+	else if (!strcmp(location, "sf", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, -2015.261108, 154.379516, 27.687500);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, -2015.261108, 154.379516, 27.687500);
+	}
+	else if (!strcmp(location, "truck", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 2187.2886, -2265.1406, 13.4754);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 2187.2886, -2265.1406, 13.4754);
+	}
+	else if (!strcmp(location, "congnhan", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 2461.0278, -2115.2649, 13.5469);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 2461.0278, -2115.2649, 13.5469);
+	}
+	else if (!strcmp(location, "binco", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 2245.4258, -1662.2477, 15.4690);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 2245.4258, -1662.2477, 15.4690);
+	}
+	else if (!strcmp(location, "247", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 1932.0830, -1776.4635, 13.3828);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 1932.0830, -1776.4635, 13.3828);
+	}
+	else if (!strcmp(location, "wangcar", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 1790.7096, -1739.4459, 13.5469);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 1790.7096, -1739.4459, 13.5469);
+	}
+	else if (!strcmp(location, "county", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 2026.7938, -1422.0918, 16.9922);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 2026.7938, -1422.0918, 16.9922);
+	}
+	else if (!strcmp(location, "allsaints", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 1177.5790, -1323.5640, 14.0777);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 1177.5790, -1323.5640, 14.0777);
+	}
+	else if (!strcmp(location, "nongdan", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, -374.0205, -1439.1160, 25.7266);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, -374.0205, -1439.1160, 25.7266);
+	}
+	else if (!strcmp(location, "dongo", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, -534.1697, -83.0436, 62.8426);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, -534.1697, -83.0436, 62.8426);
+	}
+	else if (!strcmp(location, "nhamay", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 39.5153, -287.3114, 2.0165);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 39.5153, -287.3114, 2.0165);
+	}
+	else if (!strcmp(location, "tosser", true))
+	{
+		if (IsPlayerInAnyVehicle(nguoichoi)) return SetVehiclePos(xe, 681.5443, -476.8310, 16.3359);
+		SetPlayerInterior(nguoichoi, 0);
+		SetPlayerVirtualWorld(nguoichoi, 0);
+		SetPlayerPos(nguoichoi, 681.5443, -476.8310, 16.3359);
+	}
+	else {
+		return SendClientMessage(playerid, COLOR_GRAD1, "Sai [Dia diem] !");
+	}
+	format(str, sizeof(str), " Ban da dich chuyen %s.", GN(nguoichoi));
+	SendClientMessage(playerid, COLOR_GRAD1, str);
+	format(str, sizeof(str), "[Admin] %s da dich chuyen ban.", GN(playerid));
+	SendClientMessage(nguoichoi, COLOR_YELLOW, str);
+	return 1;
+}
+CMD:gotopos(playerid, params[])
+{
+	if (PlayerInfo[playerid][pAdmin] < 1) return SendClientMessage(playerid, COLOR_GRAD1, "Khong co quyen han su dung cau lenh nay.");
+	new Float:p[3], interior;
+	if (sscanf(params, "fffd", p[0], p[1], p[2], interior)) return SendClientMessage(playerid, COLOR_GRAD1, "Su dung: /gotoco [ x ] [ y ] [ z ] [ int ]");
+	new vid = GetPlayerVehicleID(playerid);
+	if (IsPlayerInAnyVehicle(playerid))
+	{
+		SetVehiclePos(vid, p[0], p[1], p[2] + 2);
+		LinkVehicleToInterior(vid, interior);
+		SetVehicleVirtualWorld(vid, 0);
+		PutPlayerInVehicle(playerid, vid, 0);
+		SetPlayerInterior(playerid, interior);
+		SetPlayerVirtualWorld(playerid, 0);
+	}
+	else
+	{
+		SetPlayerPos(playerid, p[0], p[1], p[2] + 2);
+		SetPlayerInterior(playerid, interior);
+		SetPlayerVirtualWorld(playerid, 0);
+	}
+	SendClientMessage(playerid, COLOR_GRAD1, "Dich chuyen.");
+	return 1;
 }
 //../pawno/include/ProjectInc/onevent.inc TM
 public OnGameModeInit()
@@ -10870,6 +11246,9 @@ public OnPlayerConnect(playerid)
 	gActivePlayers[playerid]++;
 	numplayers++;
 //	new string[128]; // credits to Virtual1ty taken from GTA: RolePlay topic
+	Tazering[playerid] = 0;
+	WearTazer[playerid] = 0;
+
 	SelectChar[playerid] = 0; HidePM[playerid] = 0; PhoneOnline[playerid] = 0;
 	SelectCharID[playerid] = 0; SelectCharPlace[playerid] = 0; ChosenSkin[playerid] = 0;
 	GettingJob[playerid] = 0; GuardOffer[playerid] = 999; GuardPrice[playerid] = 0;
@@ -14376,8 +14755,6 @@ public OnPlayerStateChange(playerid, newstate, oldstate)
 }
 public OnPlayerRequestClass(playerid, classid)
 {
-	TogglePlayerSpectating(playerid, true);
-
 	SetPlayerCameraPos(playerid, 1890.1014, -1194.7969, 25.8091);
 	SetPlayerCameraLookAt(playerid, 1933.4393, -1196.2479, 18.8163);
 
@@ -14387,6 +14764,7 @@ public OnPlayerRequestClass(playerid, classid)
 
 	if (RegistrationStep[playerid] == 0 && gPlayerLogged[playerid] != 1)
 	{
+		TogglePlayerSpectating(playerid, true);
 		ClearChatbox(playerid, 10);
 		format(string, sizeof(string), "Welcome to Los Angeles Roleplay, running %s", SCRIPT_VERSION);
 		SendClientMessage(playerid, COLOR_YELLOW, string);
@@ -14536,9 +14914,12 @@ public OnPlayerLogin(playerid, password[])
 	cache_get_row_count(rowcount);
 	if (rowcount > 0)
 	{
-		cache_get_value_name(0, "Password", PlayerInfo[playerid][pKey], 128);
+		new temppass[128];
+		cache_get_value_name(0, "Password", temppass);
+		format(PlayerInfo[playerid][pKey], 128, temppass);
 		if (!strcmp(password, PlayerInfo[playerid][pKey], false))
 		{
+			new tempstr[128];
 			new temp;
 			new Float:tempf;
 				cache_get_value_name_int(0, "Level", temp);
@@ -14705,7 +15086,8 @@ public OnPlayerLogin(playerid, password[])
 			PlayerInfo[playerid][pFuel] = temp; 
 				cache_get_value_name_int(0, "Married", temp);
 			PlayerInfo[playerid][pMarried] = temp; 
-				cache_get_value_name(0, "MarriedTo", PlayerInfo[playerid][pMarriedTo]);
+				cache_get_value_name(0, "MarriedTo", tempstr);
+				format(PlayerInfo[playerid][pMarriedTo], 128, tempstr);
 				cache_get_value_name_int(0, "FishTool", temp);
 			PlayerInfo[playerid][pFishTool] = temp; 
 				cache_get_value_name_int(0, "InvWeapon", temp);
@@ -14738,7 +15120,9 @@ public OnPlayerLogin(playerid, password[])
 					PlayerInfo[playerid][pAmmo][i] = temp;
 				}
 				format(str, sizeof(str), "Note%d", i + 1);
-				cache_get_value_name(0, str, PlayerInfo[playerid][pNote][i]);
+				cache_get_value_name(0, str, tempstr);
+				format(PlayerInfo[playerid][pNote][i], 256, tempstr);
+
 				format(str, sizeof(str), "Note%ds", i + 1);
 				cache_get_value_name_int(0, str, temp);
 				PlayerInfo[playerid][pNotes][i] = temp;
@@ -14918,6 +15302,7 @@ public OnPlayerExitFood(playerid)
 }
 public OnPlayerKeyStateChange(playerid, newkeys, oldkeys)
 {
+	TazerKeyStateChange(playerid, newkeys, oldkeys);
 	new string[256];
 	new pveh = GetVehicleModel(GetPlayerVehicleID(playerid));
 	new newcar = GetPlayerVehicleID(playerid);
@@ -16386,11 +16771,34 @@ public OnDialogResponse(playerid, dialogid, response, listitem, inputtext[])
 	{
 		if (response)
 		{
+			if (isnull(inputtext))
+			{
+				ShowPlayerDialog(playerid, DIALOG_LOGIN, DIALOG_STYLE_PASSWORD, "DANG NHAP", "\n--------------LA-Roleplay--------------\nChao mung ban den voi server!\n\nXin vui long nhap mat khau: ", "Dang Nhap", "Thoat");
+				return 1;
+			}
 			OnPlayerLogin(playerid, inputtext);
+			return 1;
 		}
 		else Kick(playerid);
 	}
 	return 0;
+}
+public OnPlayerGiveDamage(playerid, damagedid, Float:amount, weaponid, bodypart)
+{
+	if (weaponid == 0)
+	{
+		new knockpercantage = random(20);
+		if (knockpercantage == 1 && KnockedDown[damagedid] != 1)
+		{
+			new str[128];
+			TogglePlayerControllable(damagedid, 0);
+			ApplyAnimation(damagedid, "CRACK", "crckdeth2", 4.0, 1, 0, 0, 0, 0);
+			SetTimerEx("ClearKnock", 20000, false, "i", damagedid);
+			KnockedDown[damagedid] = 1;
+			format(str, sizeof(str), "* %s tung mot cu dam vao mat %s, khien han ta bat tinh tai cho.", GN(playerid), GN(damagedid));
+			ProxDetector(30.0, playerid, str, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
+		}
+	}
 }
 
 //CMD
@@ -16507,10 +16915,10 @@ CMD:engine(playerid, params[])
 
 				new playerveh = GetPlayerVehicleID(playerid);
 				PutPlayerInVehicle(playerid, playerveh, 0);
-				format(string, sizeof(string), "* %s spins a key and tries to start vehicle engine.", GN(playerid));
+				format(string, sizeof(string), "* %s van chi khoa khoi dong dong co.", GN(playerid));
 				ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				SetTimerEx("StartingTheVehicle", 3500, 0, "i", playerid);
-				GameTextForPlayer(playerid, "~w~Starting vehicle engine...", 3500, 3);
+				GameTextForPlayer(playerid, "~w~Dong co dang khoi dong...", 3500, 3);
 				gEngine[playerid] = 1;
 				return 1;
 			}
@@ -16561,7 +16969,7 @@ CMD:engine(playerid, params[])
 				engineOn[GetPlayerVehicleID(playerid)] = false;
 				//RemovePlayerFromVehicle(playerid);
 				TogglePlayerControllable(playerid, 0);
-				format(string, sizeof(string), "* %s spins the vehicle key and turns off the engine.", GN(playerid));
+				format(string, sizeof(string), "* %s xoay chia khoa va tat may xe.", GN(playerid));
 				ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				gEngine[playerid] = 0;
 				/*					new keycar = PlayerInfo[playerid][pPcarkey][0];
@@ -17500,98 +17908,98 @@ CMD:lockhq(playerid, params[])
 	}
 	return 1;
 }
-CMD:knockout(playerid, params[])
-{
-	if (IsPlayerConnected(playerid))
-	{
-		if (gPlayerLogged[playerid] == 0)
-		{
-			SendClientMessage(playerid, COLOR_GREY, "Ban can phai dang nhap truoc.");
-			return 1;
-		}
-		if (PlayerInfo[playerid][pLevel] < 3)
-		{
-			SendClientMessage(playerid, COLOR_GREY, "Ban can lv3 de su dung lenh nay.");
-			return 1;
-		}
-		if (KnockedDown[playerid] == 1)
-		{
-			SendClientMessage(playerid, COLOR_GREY, "Ban khong the xoay khi ban dang nga xuong .");
-			return 1;
-		}
-		if (PlayerInfo[playerid][pSex] == 2)
-		{
-			SendClientMessage(playerid, COLOR_GREY, "Ban qua yeu de ha guc mot nguoi nao do");
-			return 1;
-		}
-		if (PlayerBoxing[playerid] != 0)
-		{
-			SendClientMessage(playerid, COLOR_GREY, "Khong su dung lenh khi dang danh boxing");
-			return 1;
-		}
-		new giveplayerid, string[256];
-		if (sscanf(params, "u", giveplayerid))
-			return SendClientMessage(playerid, COLOR_WHITE, "Su dung lenh: /knockout [Playerid/PartOfName]");
-
-		if (IsPlayerConnected(giveplayerid))
-		{
-			if (giveplayerid != INVALID_PLAYER_ID)
-			{
-				if (ProxDetectorS(1.0, playerid, giveplayerid))
-				{
-					if (KnockedDown[giveplayerid] != 1)
-					{
-						if (giveplayerid == playerid)
-						{
-							SendClientMessage(playerid, COLOR_GREY, "   Ban khong the lam vay voi chinh minh.");
-							return 1;
-						}
-						if (PlayerInfo[giveplayerid][pSex] == 2)
-						{
-							SendClientMessage(playerid, COLOR_GREY, "Ban co chac chan ha guc mot nguoi phu nu?");
-							return 1;
-						}
-						if (IsPlayerInAnyVehicle(giveplayerid))
-						{
-							return 1;
-						}
-						new giveplayername[MAX_PLAYER_NAME];
-						GetPlayerName(giveplayerid, giveplayername, sizeof(giveplayername));
-						new rands = random(2) + 1;
-						format(string, sizeof(string), "* %s danh manh vao %s va co gang knock out anh ay.", GN(playerid), giveplayername);
-						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
-						ApplyAnimation(playerid, "FIGHT_D", "FightD_3", 4.0, 0, 1, 1, 0, 0);
-						if (rands == 1)
-						{
-							TogglePlayerControllable(giveplayerid, 0);
-							ApplyAnimation(giveplayerid, "CRACK", "crckdeth2", 4.0, 1, 0, 0, 0, 0);
-							SetTimerEx("ClearKnock", 20000, false, "i", giveplayerid);
-							KnockedDown[giveplayerid] = 1;
-							format(string, sizeof(string), "* %s Ha guc muc tieu thanh cong.", GN(playerid));
-							ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
-						}
-						else
-						{
-							format(string, sizeof(string), "* %s Da truot va khong ha guc duoc muc tieu.", GN(playerid));
-							ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
-						}
-						return 1;
-					}
-					else
-					{
-						SendClientMessage(playerid, COLOR_GREY, "Nguoi choi da bi ha guc.");
-					}
-				}
-				else
-				{
-					SendClientMessage(playerid, COLOR_GREY, "Nguoi choi khong gan ban.");
-				}
-			}
-		}
-
-	}
-	return 1;
-}
+//CMD:knockout(playerid, params[])
+//{
+//	if (IsPlayerConnected(playerid))
+//	{
+//		if (gPlayerLogged[playerid] == 0)
+//		{
+//			SendClientMessage(playerid, COLOR_GREY, "Ban can phai dang nhap truoc.");
+//			return 1;
+//		}
+//		if (PlayerInfo[playerid][pLevel] < 3)
+//		{
+//			SendClientMessage(playerid, COLOR_GREY, "Ban can lv3 de su dung lenh nay.");
+//			return 1;
+//		}
+//		if (KnockedDown[playerid] == 1)
+//		{
+//			SendClientMessage(playerid, COLOR_GREY, "Ban khong the xoay khi ban dang nga xuong .");
+//			return 1;
+//		}
+//		if (PlayerInfo[playerid][pSex] == 2)
+//		{
+//			SendClientMessage(playerid, COLOR_GREY, "Ban qua yeu de ha guc mot nguoi nao do");
+//			return 1;
+//		}
+//		if (PlayerBoxing[playerid] != 0)
+//		{
+//			SendClientMessage(playerid, COLOR_GREY, "Khong su dung lenh khi dang danh boxing");
+//			return 1;
+//		}
+//		new giveplayerid, string[256];
+//		if (sscanf(params, "u", giveplayerid))
+//			return SendClientMessage(playerid, COLOR_WHITE, "Su dung lenh: /knockout [Playerid/PartOfName]");
+//
+//		if (IsPlayerConnected(giveplayerid))
+//		{
+//			if (giveplayerid != INVALID_PLAYER_ID)
+//			{
+//				if (ProxDetectorS(1.0, playerid, giveplayerid))
+//				{
+//					if (KnockedDown[giveplayerid] != 1)
+//					{
+//						if (giveplayerid == playerid)
+//						{
+//							SendClientMessage(playerid, COLOR_GREY, "   Ban khong the lam vay voi chinh minh.");
+//							return 1;
+//						}
+//						if (PlayerInfo[giveplayerid][pSex] == 2)
+//						{
+//							SendClientMessage(playerid, COLOR_GREY, "Ban co chac chan ha guc mot nguoi phu nu?");
+//							return 1;
+//						}
+//						if (IsPlayerInAnyVehicle(giveplayerid))
+//						{
+//							return 1;
+//						}
+//						new giveplayername[MAX_PLAYER_NAME];
+//						GetPlayerName(giveplayerid, giveplayername, sizeof(giveplayername));
+//						new rands = random(2) + 1;
+//						format(string, sizeof(string), "* %s danh manh vao %s va co gang knock out anh ay.", GN(playerid), giveplayername);
+//						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
+//						ApplyAnimation(playerid, "FIGHT_D", "FightD_3", 4.0, 0, 1, 1, 0, 0);
+//						if (rands == 1)
+//						{
+//							TogglePlayerControllable(giveplayerid, 0);
+//							ApplyAnimation(giveplayerid, "CRACK", "crckdeth2", 4.0, 1, 0, 0, 0, 0);
+//							SetTimerEx("ClearKnock", 20000, false, "i", giveplayerid);
+//							KnockedDown[giveplayerid] = 1;
+//							format(string, sizeof(string), "* %s Ha guc muc tieu thanh cong.", GN(playerid));
+//							ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
+//						}
+//						else
+//						{
+//							format(string, sizeof(string), "* %s Da truot va khong ha guc duoc muc tieu.", GN(playerid));
+//							ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
+//						}
+//						return 1;
+//					}
+//					else
+//					{
+//						SendClientMessage(playerid, COLOR_GREY, "Nguoi choi da bi ha guc.");
+//					}
+//				}
+//				else
+//				{
+//					SendClientMessage(playerid, COLOR_GREY, "Nguoi choi khong gan ban.");
+//				}
+//			}
+//		}
+//
+//	}
+//	return 1;
+//}
 /*if(strcmp(cmd, "/carcolor", true) == 0) // by Ellis
 {
 if(IsPlayerConnected(playerid))
@@ -20629,7 +21037,7 @@ CMD:tuningclose(playerid, params[])
 	else return SendClientMessage(playerid, COLOR_GREY, "Ban khong co remote de mo.");
 	return 1;
 }
-CMD:docoropen(playerid, params[])
+CMD:dooropen(playerid, params[])
 {
 	new string[256];
 	if (PlayerInfo[playerid][pLeader] == 1 || PlayerInfo[playerid][pLeader] == 2 || PlayerInfo[playerid][pLeader] == 3 || PlayerInfo[playerid][pMember] == 1 || PlayerInfo[playerid][pMember] == 2 || PlayerInfo[playerid][pMember] == 3)
@@ -25984,6 +26392,9 @@ CMD:evictall(playerid, params[])
 						{
 							SendClientMessage(i, COLOR_WHITE, "Ban bi duoi ra khoi nha cua ban.");
 							PlayerInfo[i][pPhousekey] = 255;
+							new houseid = PlayerInfo[playerid][pPhousekey];
+							SetPlayerPos(i, HouseInfo[houseid][hEntrancex], HouseInfo[houseid][hEntrancey], HouseInfo[houseid][hEntrancez]);
+							SetPlayerInterior(i, 0);
 						}
 					}
 				}
@@ -26025,6 +26436,9 @@ CMD:evict(playerid, params[])
 						SendClientMessage(target, COLOR_WHITE, "You have been evicted");
 						SendClientMessage(playerid, COLOR_WHITE, "Player has been evicted");
 						PlayerInfo[target][pPhousekey] = 255;
+						new houseid = PlayerInfo[playerid][pPhousekey];
+						SetPlayerPos(target, HouseInfo[houseid][hEntrancex], HouseInfo[houseid][hEntrancey], HouseInfo[houseid][hEntrancez]);
+						SetPlayerInterior(target, 0);
 						return 1;
 					}
 					else
@@ -28565,11 +28979,12 @@ CMD:prison(playerid, params[])
 		{
 			if (giveplayerid != INVALID_PLAYER_ID)
 			{
-				format(string, sizeof(string), "* Ban da dich chuyen %s den Fort DeMorgan.", GN(giveplayerid));
+				format(string, sizeof(string), "* Ban da tong giam %s den Fort DeMorgan.", GN(giveplayerid));
 				SendClientMessage(playerid, COLOR_LIGHTRED, string);
-				format(string, sizeof(string), "* Ban da duoc dich chuyen den Fort DeMorgan boi Admin %s.", GN(playerid));
+				format(string, sizeof(string), "* Ban bi tong giam vao Fort DeMorgan boi Admin %s.", GN(playerid));
 				SendClientMessage(giveplayerid, COLOR_LIGHTRED, string);
 				GameTextForPlayer(giveplayerid, "~w~Welcome to ~n~~r~Fort DeMorgan", 5000, 3);
+				SafeResetPlayerWeapons(giveplayerid);
 				WantedPoints[giveplayerid] = 0;
 				WantedLevel[giveplayerid] = 0;
 				PlayerInfo[giveplayerid][pJailed] = 2;
@@ -30041,87 +30456,6 @@ CMD:setjob(playerid, params[])
 	}
 	return 1;
 }
-CMD:gotols(playerid, params[])
-{
-	if (IsPlayerConnected(playerid))
-	{
-		if (PlayerInfo[playerid][pAdmin] >= 3)
-		{
-			if (GetPlayerState(playerid) == 2)
-			{
-				new tmpcar = GetPlayerVehicleID(playerid);
-				SetVehiclePos(tmpcar, 1529.6, -1691.2, 13.3);
-				TelePos[playerid][0] = 0.0; TelePos[playerid][1] = 0.0;
-			}
-			else
-			{
-				SetPlayerPos(playerid, 1529.6, -1691.2, 13.3);
-			}
-			SendClientMessage(playerid, COLOR_GRAD1, "   Da duoc dich chuyen !");
-			SetPlayerInterior(playerid, 0);
-			PlayerInfo[playerid][pInt] = 0;
-		}
-		else
-		{
-			SendClientMessage(playerid, COLOR_GRAD1, "   Ban khong co quyen nay to use that command !");
-		}
-	}
-	return 1;
-}
-CMD:gotolv(playerid, params[])
-{
-	if (IsPlayerConnected(playerid))
-	{
-		if (PlayerInfo[playerid][pAdmin] >= 3)
-		{
-			if (GetPlayerState(playerid) == 2)
-			{
-				new tmpcar = GetPlayerVehicleID(playerid);
-				SetVehiclePos(tmpcar, 1699.2, 1435.1, 10.7);
-				TelePos[playerid][0] = 0.0; TelePos[playerid][1] = 0.0;
-			}
-			else
-			{
-				SetPlayerPos(playerid, 1699.2, 1435.1, 10.7);
-			}
-			SendClientMessage(playerid, COLOR_GRAD1, "   You have been teleported");
-			SetPlayerInterior(playerid, 0);
-			PlayerInfo[playerid][pInt] = 0;
-		}
-		else
-		{
-			SendClientMessage(playerid, COLOR_GRAD1, "   Ban khong co quyen nay to use that command!");
-		}
-	}
-	return 1;
-}
-CMD:gotosf(playerid, params[])
-{
-	if (IsPlayerConnected(playerid))
-	{
-		if (PlayerInfo[playerid][pAdmin] >= 3)
-		{
-			if (GetPlayerState(playerid) == 2)
-			{
-				new tmpcar = GetPlayerVehicleID(playerid);
-				SetVehiclePos(tmpcar, -1417.0, -295.8, 14.1);
-				TelePos[playerid][0] = 0.0; TelePos[playerid][1] = 0.0;
-			}
-			else
-			{
-				SetPlayerPos(playerid, -1417.0, -295.8, 14.1);
-			}
-			SendClientMessage(playerid, COLOR_GRAD1, "   You have been teleported");
-			SetPlayerInterior(playerid, 0);
-			PlayerInfo[playerid][pInt] = 0;
-		}
-		else
-		{
-			SendClientMessage(playerid, COLOR_GRAD1, "   Ban khong co quyen nay to use that command!");
-		}
-	}
-	return 1;
-}
 CMD:entercar(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -30342,6 +30676,8 @@ CMD:gotoid(playerid, params[])
 					{
 						SetPlayerPos(playerid, plocx, plocy + 2, plocz);
 					}
+					PlayerInfo[playerid][pVirWorld] = GetPlayerVirtualWorld(plo);
+					SetPlayerVirtualWorld(playerid, PlayerInfo[playerid][pVirWorld]);
 					SendClientMessage(playerid, COLOR_GRAD1, "   Da duoc dich chuyen");
 				}
 				else
@@ -30832,7 +31168,6 @@ CMD:slap(playerid, params[])
 			{
 				if (playa != INVALID_PLAYER_ID)
 				{
-
 					GetPlayerHealth(playa, shealth);
 					SetPlayerHealth(playa, shealth - 5);
 					GetPlayerPos(playa, slx, sly, slz);
@@ -33775,7 +34110,7 @@ CMD:deliver(playerid, params[])
 	if (IsPlayerConnected(playerid))
 	{
 		new giveplayerid, string[255];
-		if (PlayerInfo[playerid][pJob] == 15 || gTeam[playerid] == 2 || PlayerInfo[playerid][pLeader] == 6 || PlayerInfo[playerid][pLeader] == 10)
+		if (gTeam[playerid] == 2 || PlayerInfo[playerid][pLeader] == 6 || PlayerInfo[playerid][pLeader] == 10)
 		{
 			if (gTeam[playerid] == 2 || IsACop(playerid))
 			{
@@ -33793,15 +34128,15 @@ CMD:deliver(playerid, params[])
 				{
 					if (giveplayerid != INVALID_PLAYER_ID)
 					{
-						if (giveplayerid == playerid) { SendClientMessage(playerid, COLOR_GREY, "   Khong the nem ban than vao trong Fort DeMorgan !"); return 1; }
-						if (WantedLevel[giveplayerid] < 1) { SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi can it nhat mot muc do truy na de vao Fort DeMorgan !"); return 1; }
+						if (giveplayerid == playerid) { SendClientMessage(playerid, COLOR_GREY, "   Khong the tong giam ban than vao Fort DeMorgan !"); return 1; }
+						if (WantedLevel[giveplayerid] < 1) { SendClientMessage(playerid, COLOR_GREY, "   Chi co the tong giam nguoi co Wanted vao Fort DeMorgan !"); return 1; }
 						if (gTeam[giveplayerid] == 2 || PlayerInfo[giveplayerid][pLeader] == 6 || PlayerInfo[giveplayerid][pLeader] == 10) { return 1; }
 						if (ProxDetectorS(8.0, playerid, giveplayerid))
 						{
 
-							format(string, sizeof(string), "* Ban mang %s vao Fort DeMorgan.", GN(giveplayerid));
+							format(string, sizeof(string), "* Ban tong giam %s vao Fort DeMorgan.", GN(giveplayerid));
 							SendClientMessage(playerid, COLOR_WHITE, string);
-							format(string, sizeof(string), "* %s mang ban vao Fort DeMorgan.", GN(playerid));
+							format(string, sizeof(string), "* %s tong giam ban vao Fort DeMorgan.", GN(playerid));
 							SendClientMessage(giveplayerid, COLOR_WHITE, string);
 							GameTextForPlayer(giveplayerid, "~w~Welcome to ~n~~r~Fort DeMorgan", 5000, 3);
 							WantedPoints[giveplayerid] = 0;
@@ -37903,75 +38238,75 @@ CMD:fillcar(playerid, params[])
 	}
 	return 1;
 }
-CMD:tazer(playerid, params[])
-{
-	if (IsPlayerConnected(playerid))
-	{
-		if (gTeam[playerid] == 2 || IsACop(playerid))
-		{
-			if (IsPlayerInAnyVehicle(playerid))
-			{
-				SendClientMessage(playerid, COLOR_GREY, "   Khong the dung khi dang o trong xe!");
-				return 1;
-			}
-			new suspect = GetClosestPlayer(playerid);
-			new giveplayer[50], string[256];
-			if (IsPlayerConnected(suspect))
-			{
-				if (PlayerCuffed[suspect] > 0)
-				{
-					SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi da bi cong!");
-					return 1;
-				}
-				if (GetDistanceBetweenPlayers(playerid, suspect) < 5)
-				{
-					if (gTeam[suspect] == 2)
-					{
-						SendClientMessage(playerid, COLOR_GREY, "   Khong the Tazer Canh sat / FBI!");
-						return 1;
-					}
-					if (IsPlayerInAnyVehicle(suspect))
-					{
-						SendClientMessage(playerid, COLOR_GREY, "   Viec nghi ngo thuc hien tren xe, loi han ra truoc!");
-						return 1;
-					}
-					GetPlayerName(suspect, giveplayer, sizeof(giveplayer));
-					
-					new randt = random(4) + 1;
-					if (randt == 1)
-					{
-						format(string, sizeof(string), "* %s ban voi sung tazer cua anh ay %s, truot.", GN(playerid), giveplayer);
-						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
-					}
-					else
-					{
-						format(string, sizeof(string), "* Ban da bi tazed boi %s trong 20 giay.", GN(playerid));
-						SendClientMessage(suspect, COLOR_WHITE, string);
-						format(string, sizeof(string), "* Ban da Tazed %s trong 20 giay.", giveplayer);
-						SendClientMessage(playerid, COLOR_WHITE, string);
-						format(string, sizeof(string), "* %s ban voi sung tazer cua anh ay %s va tazed han.", GN(playerid), giveplayer);
-						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
-						GameTextForPlayer(suspect, "~r~Tazed", 2500, 3);
-						TogglePlayerControllable(suspect, 0);
-						LoopingAnim(suspect, "CRACK", "crckdeth2", 4.0, 1, 0, 0, 0, 0);
-						PlayerCuffed[suspect] = 1;
-						PlayerCuffedTime[suspect] = 20;
-					}
-				}
-				else
-				{
-					SendClientMessage(playerid, COLOR_GREY, "   Khong ai o gan ban!");
-					return 1;
-				}
-			}
-		}
-		else
-		{
-			SendClientMessage(playerid, COLOR_GREY, "   Ban khong phai la Canh sat / FBI!");
-		}
-	}//not connected
-	return 1;
-}
+//CMD:tazer(playerid, params[])
+//{
+//	if (IsPlayerConnected(playerid))
+//	{
+//		if (gTeam[playerid] == 2 || IsACop(playerid))
+//		{
+//			if (IsPlayerInAnyVehicle(playerid))
+//			{
+//				SendClientMessage(playerid, COLOR_GREY, "   Khong the dung khi dang o trong xe!");
+//				return 1;
+//			}
+//			new suspect = GetClosestPlayer(playerid);
+//			new giveplayer[50], string[256];
+//			if (IsPlayerConnected(suspect))
+//			{
+//				if (PlayerCuffed[suspect] > 0)
+//				{
+//					SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi da bi cong!");
+//					return 1;
+//				}
+//				if (GetDistanceBetweenPlayers(playerid, suspect) < 5)
+//				{
+//					if (gTeam[suspect] == 2)
+//					{
+//						SendClientMessage(playerid, COLOR_GREY, "   Khong the Tazer Canh sat / FBI!");
+//						return 1;
+//					}
+//					if (IsPlayerInAnyVehicle(suspect))
+//					{
+//						SendClientMessage(playerid, COLOR_GREY, "   Viec nghi ngo thuc hien tren xe, loi han ra truoc!");
+//						return 1;
+//					}
+//					GetPlayerName(suspect, giveplayer, sizeof(giveplayer));
+//					
+//					new randt = random(4) + 1;
+//					if (randt == 1)
+//					{
+//						format(string, sizeof(string), "* %s ban voi sung tazer cua anh ay %s, truot.", GN(playerid), giveplayer);
+//						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
+//					}
+//					else
+//					{
+//						format(string, sizeof(string), "* Ban da bi tazed boi %s trong 20 giay.", GN(playerid));
+//						SendClientMessage(suspect, COLOR_WHITE, string);
+//						format(string, sizeof(string), "* Ban da Tazed %s trong 20 giay.", giveplayer);
+//						SendClientMessage(playerid, COLOR_WHITE, string);
+//						format(string, sizeof(string), "* %s ban voi sung tazer cua anh ay %s va tazed han.", GN(playerid), giveplayer);
+//						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
+//						GameTextForPlayer(suspect, "~r~Tazed", 2500, 3);
+//						TogglePlayerControllable(suspect, 0);
+//						LoopingAnim(suspect, "CRACK", "crckdeth2", 4.0, 1, 0, 0, 0, 0);
+//						PlayerCuffed[suspect] = 1;
+//						PlayerCuffedTime[suspect] = 20;
+//					}
+//				}
+//				else
+//				{
+//					SendClientMessage(playerid, COLOR_GREY, "   Khong ai o gan ban!");
+//					return 1;
+//				}
+//			}
+//		}
+//		else
+//		{
+//			SendClientMessage(playerid, COLOR_GREY, "   Ban khong phai la Canh sat / FBI!");
+//		}
+//	}//not connected
+//	return 1;
+//}
 CMD:agent(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -42196,3 +42531,30 @@ CMD:exit(playerid, params[])
 	}
 	return 1;
  }
+//../pawno/include/ProjectInc/ontimer.inc TM
+task ServerBeat[1000]()
+{
+	foreach(Player, playerid)
+	{
+		if (OnDuty[playerid] == 1 && (PlayerInfo[playerid][pMember] == 1 || PlayerInfo[playerid][pLeader] == 1) && WearTazer[playerid] != 1)
+		{
+			Tazering[playerid] = 0;
+			SetPlayerAttachedObject(playerid, 5, 18642, 1, -0.197000, -0.071000, -0.109999, 2.399994, 80.400001, 18.399993, 1.000000, 1.000000, 1.000000, 0, 0);
+			WearTazer[playerid] = 1;
+		}
+		else if (OnDuty[playerid] == 0 && (PlayerInfo[playerid][pMember] == 1 || PlayerInfo[playerid][pLeader] == 1) && WearTazer[playerid] == 1)
+		{
+			Tazering[playerid] = 0;
+			RemovePlayerAttachedObject(playerid, 5);
+			WearTazer[playerid] = 1;
+		}
+		if (Tazering[playerid] == 1) SetPlayerArmedWeapon(playerid, 0);
+
+		if (--Tazered[playerid] == 0 && Tazered[playerid] > 0)
+		{
+			TogglePlayerControllable(playerid, 1);
+			ClearAnimations(playerid);
+		}
+	}
+	//printf("Called every second, but not at the same time as RepeatingFunction2.");
+}
