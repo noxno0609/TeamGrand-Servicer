@@ -19,4 +19,3 @@
 "** LARP Administrator [ID:%d]%s has denied your report and will hopefully PM the reason !"-"** LARP Administrator [ID:%d]%s da tu choi bao cao cua ban va se co gang noi cho ban ly do !"
 "AdmWarning: %s has just accepted the report of [ID:%d]%s."-"AdmWarning: %s da chap nhan bao cao cua [ID:%d]%s."
 "** LARP Administrator [ID:%d]%s has accepted your report and now ready to assist you! Please be patience."-"** LARP Administrator [ID:%d]%s da chap nhan bao cao cua ban va se den ho tro ban! Xin vui long cho giay lat."
-
