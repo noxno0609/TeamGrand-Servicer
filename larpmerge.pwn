@@ -202,7 +202,10 @@ forward LoadIRC();
 forward SaveIRC();
 forward LoadPapers();
 forward SavePapers();
+forward DeleteDealership(id);
+forward UpdateDealership();
 forward AddCar(model, Float:x, Float:y, Float:z, Float:a, color1, color2, respawntime, owner[], owned, price);
+forward AddDealership(model, Float:x, Float:y, Float:z, Float:a, color1, color2, respawntime, price, amount);
 forward LoadCar();
 //forward SaveCarCoords();
 forward LoadBoxer();
@@ -369,7 +372,6 @@ forward SaveMatsSystem();
 forward LoadingDrugsForSmugglers(playerid);
 forward SmugglerExit(playerid);
 forward SafeGivePlayerMoney(plyid, amounttogive);
-forward SafeGivePlayerWeapon(plyid, weaponid, ammo);
 forward SafeResetPlayerMoney(plyid);
 forward SafeResetPlayerWeapons(plyid);
 forward UpdateWeaponSlots(plyid);
@@ -1691,6 +1693,7 @@ enum cInfo
 	cRegistration,
 	cOwned,
 	cLock,
+	cType
 };
 new CarInfo[MAX_VEHICLES][cInfo];
 
@@ -2777,6 +2780,79 @@ public LoadPapers()
 	}
 	return 1;
 }
+public AddDealership(model, Float:x, Float:y, Float:z, Float:a, color1, color2, respawntime, price, amount)
+{
+	new sql[500];
+	new vid = AddCar(model, x, y, z, a, color1, color2, 60000, "Dealership", 0, price);
+	format(sql, sizeof(sql), "INSERT INTO dealership (`Model`, PosX, PosY,\
+									 									PosZ, PosAngle, Color1, Color2, `Price`, SellVehID, Amount) \
+																		VALUES (%d, %f, %f, %f, %f, %d, %d, %d, %d, %d)",
+																		model, x, y, z, a, color1, color2, price, CarInfo[vid][cID], amount);
+	mysql_query(conn, sql);
+	UpdateDealership();
+}
+public UpdateDealership()
+{
+	new sql[500];
+	format(sql, sizeof(sql), "SELECT * FROM dealership");
+	mysql_query(conn, sql);
+	new row;
+	cache_get_row_count(row);
+	for (new i = 0; i < row; i++)
+	{
+		new amount;
+		cache_get_value_name_int(i, "Amount", amount);
+		if (amount == 0)
+		{
+			DeleteDealership(i+1);
+			continue;
+		}
+
+		new vehid;
+		cache_get_value_name_int(0, "SellVehID", vehid);
+
+		new vid = GetVehicleByCarID(vehid);
+		if (vid == -1 || (CarInfo[vid][cOwned] == 1 && vid != -1) || vehid == -1)
+		{
+			new model, Float:pos[4], color[2], price;
+			cache_get_value_name_int(i, "Model", model);
+			cache_get_value_name_float(i, "PosX", pos[0]);
+			cache_get_value_name_float(i, "PosY", pos[1]);
+			cache_get_value_name_float(i, "PosZ", pos[2]);
+			cache_get_value_name_float(i, "PosAngle", pos[3]);
+			cache_get_value_name_int(i, "Color1", color[0]);
+			cache_get_value_name_int(i, "Color2", color[1]);
+			cache_get_value_name_int(i, "Price", price);
+			
+			new newvid = AddCar(model, pos[0], pos[1], pos[2], pos[3], color[0], color[1], 60000, "Dealership", 0, price);
+
+			format(sql, sizeof(sql), "UPDATE dealership SET SellVehID = %d, `Amount` = %d WHERE ID = %d", CarInfo[newvid][cID], amount-1, i+1);
+			mysql_query(conn, sql);
+		}
+	}
+}
+public DeleteDealership(id)
+{
+	new sql[500];
+	format(sql, sizeof(sql), "SELECT * FROM dealership WHERE ID = %d", id);
+	mysql_query(conn, sql);
+	new row;
+	cache_get_row_count(row);
+	if (row != 0)
+	{
+		new vehid;
+		cache_get_value_name_int(0, "SellVehID", vehid);
+		if (vehid != 0)
+		{
+			new vid = GetVehicleByCarID(vehid);
+			if (vid != -1)
+				DestroyCar(vid);
+		}
+	}
+	format(sql, sizeof(sql), "DELETE FROM dealership WHERE ID = %d", id);
+	mysql_query(conn, sql);
+	return 1;
+}
 public AddCar(model, Float:x, Float:y, Float:z, Float:a, color1, color2, respawntime, owner[], owned, price)
 {
 	new sql[500];
@@ -2799,6 +2875,7 @@ public AddCar(model, Float:x, Float:y, Float:z, Float:a, color1, color2, respawn
 	CarInfo[vid][cColorTwo] = color2;
 	CarInfo[vid][cValue] = price;
 	CarInfo[vid][cID] = newId;
+	CarInfo[vid][cLock] = 0;
 
 	format(sql, sizeof(sql), "INSERT INTO cartrunk (VehID) VALUES (%d)", newId);
 	mysql_query(conn, sql);
@@ -2812,6 +2889,8 @@ public AddCar(model, Float:x, Float:y, Float:z, Float:a, color1, color2, respawn
 	vehTrunkAmmo[vid][4] = 0;
 	vehTrunkCounter[vid] = 0;
 	vehTrunkArmour[vid] = 0;
+
+	return vid;
 }
 public LoadCar()
 {
@@ -2822,6 +2901,7 @@ public LoadCar()
 	mysql_query(conn, sql);
 	new row;
 	cache_get_row_count(row);
+	printf("%d", row);
 	for (new idx = 0; idx < row; idx++)
 	{
 		new model, Float:pos[4], color[2];
@@ -2842,16 +2922,21 @@ public LoadCar()
 		CarInfo[vid][cColorOne] = color[0];
 		CarInfo[vid][cColorTwo] = color[1];
 
+		cache_get_value_name_int(idx, "Owned", tmp); CarInfo[vid][cOwned] = tmp;
 		cache_get_value_name(idx, "Owner", tmpstr); format(CarInfo[vid][cOwner], 128, tmpstr);
-		cache_get_value_name_int(idx, "ID", tmp); CarInfo[vid][cID] = tmp;
 		cache_get_value_name(idx, "Description", tmpstr); format(CarInfo[vid][cDescription], 128, tmpstr);
+		cache_get_value_name_int(idx, "ID", tmp); CarInfo[vid][cID] = tmp;
 		cache_get_value_name_int(idx, "Value", tmp); CarInfo[vid][cValue] = tmp;
 		cache_get_value_name_int(idx, "License", tmp); CarInfo[vid][cLicense] = tmp;
-		cache_get_value_name_int(idx, "Owned", tmp); CarInfo[vid][cOwned] = tmp;
 		cache_get_value_name_int(idx, "Lock", tmp); CarInfo[vid][cLock] = tmp;
+		cache_get_value_name_int(idx, "Type", tmp); CarInfo[vid][cType] = tmp;
+
+		if (CarInfo[vid][cType] > 0)
+			CarInfo[vid][cID] = -1;
 		
 		printf("CarInfo: %d Owner:%s LicensePlate %s", vid, CarInfo[vid][cOwner], CarInfo[vid][cLicense]);
 	}
+
 	/*new arrCoords[13][64];
 	new strFromFile2[256];
 	new File: file = fopen("cars.cfg", io_read);
@@ -2880,6 +2965,79 @@ public LoadCar()
 		}
 	}*/
 	return 1;
+}
+stock InsertVeh()
+{
+	new type = 0;
+	for (new carid = 0; carid < 184; carid++)
+	{
+		if (IsAHarvest(carid))
+			type = HARVESTVEH;
+
+		if (IsADrugHarvest(carid))
+			type = DHARVESTVEH;
+
+		if (IsASmuggleCar(carid))
+			type = SMUGGLEVEH;
+
+		if (IsASweeper(carid))
+			type = SWEEPERVEH;
+
+		if (IsACopCar(carid))
+			type = COPVEH;
+
+		if (IsAnFbiCar(carid))
+			type = FBIVEH;
+
+		if (IsNgCar(carid))
+			type = NGVEH;
+
+		if (IsAGovernmentCar(carid))
+			type = GORVEH;
+
+		if (IsAHspdCar(carid))
+			type = HSPDVEH;
+
+		if (IsAnAmbulance(carid))
+			type = AMBUVEH;
+
+		if (IsATruck(carid))
+			type = TRUCKVEH;
+
+		if (IsAPizzabike(carid))
+			type = PIZZAVEH;
+
+		if (IsABus(carid))
+			type = BUSVEH;
+
+		if (IsATowcar(carid))
+			type = TOWVEH;
+
+		if (type == 0) continue;
+
+		if (CarInfo[carid][cOwned] == 1) continue;
+
+		format(CarInfo[carid][cOwner], 128, "The State");
+		if (CarInfo[carid][cModel] == 0)
+			CarInfo[carid][cModel] = GetVehicleModel(carid);
+
+		GetVehiclePos(carid, CarInfo[carid][cLocationx], CarInfo[carid][cLocationy], CarInfo[carid][cLocationz]);
+		GetVehicleZAngle(carid, CarInfo[carid][cAngle]);
+
+		new sql[500];
+		format(sql, sizeof(sql), "INSERT INTO car (Owner, Owned, `Model`, Locationx, Locationy, \
+															Locationz, `Angle`, ColorOne, ColorTwo, \
+															Description, `Value`, License, `Lock`, Type) \
+												VALUES ('%s', %d, %d, %f, %f, %f, %f, %d, %d, '%s', %d, %d, %d, %d)",
+												CarInfo[carid][cOwner], CarInfo[carid][cOwned],
+												CarInfo[carid][cModel], CarInfo[carid][cLocationx],
+												CarInfo[carid][cLocationy], CarInfo[carid][cLocationz],
+												CarInfo[carid][cAngle], CarInfo[carid][cColorOne],
+												CarInfo[carid][cColorTwo], CarInfo[carid][cDescription],
+												CarInfo[carid][cValue], CarInfo[carid][cLicense], CarInfo[carid][cLock], type);
+		mysql_query(conn, sql);
+		printf("Insert");
+	}
 }
 public LoadProperty()
 {
@@ -3033,6 +3191,7 @@ public LoadBizz()
 
 		new idx;
 		cache_get_value_name_int(0, "ID", idx);
+		idx -= 1;
 		cache_get_value_name_int(0, "Owned", tmp); BizzInfo[idx][bOwned] = tmp;
 		cache_get_value_name(0, "Owner", tmpstr); format(BizzInfo[idx][bOwner], 128, tmpstr);
 		cache_get_value_name(0, "Message", tmpstr); format(BizzInfo[idx][bMessage], 128, tmpstr);
@@ -3253,11 +3412,11 @@ stock GetVehicleIDFromSQLID(sqlid)
 public LoadTrunk()
 {
 	new tmp, Float:tmpf, sql[500];
-	format(sql, sizeof(sql), "SELECT * FROM car");
+	format(sql, sizeof(sql), "SELECT * FROM cartrunk");
 	mysql_query(conn, sql);
 	new row;
 	cache_get_row_count(row);
-	for (new idx = 1; idx < row + 1; idx++)
+	for (new idx = 0; idx < row; idx++)
 	{
 		new vsqlid;
 		cache_get_value_name_int(idx, "VehID", vsqlid);
@@ -4034,18 +4193,233 @@ public IsAtBar(playerid)
 	return 0;
 }
 
+//public IsABoat(carid)
+//{
+//	if (carid == 10 || carid == 11)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAHarvest(carid)
+//{
+//	if (carid == 155 || carid == 156 || carid == 157 || carid == 158)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsADrugHarvest(carid)
+//{
+//	if (carid == 159 || carid == 160 || carid == 161 || carid == 162)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsASmuggleCar(carid)
+//{
+//	if (carid == 163 || carid == 164 || carid == 165)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsASweeper(carid)
+//{
+//	if ((carid >= 169) && (carid <= 171))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAPlane(carid)
+//{
+//	if (carid == 38 || carid == 55 || carid == 73 || carid == 167 || carid == 168)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsACopCar(carid)
+//{
+//	if ((carid >= 16) && (carid <= 38))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAnFbiCar(carid)
+//{
+//	if ((carid >= 39) && (carid <= 43))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsNgCar(carid)
+//{
+//	if ((carid >= 1) && (carid <= 11))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAGovernmentCar(carid)
+//{
+//	if ((carid >= 12) && (carid <= 15) || carid == 168)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAHspdCar(carid)
+//{
+//	if ((carid >= 44) && (carid <= 51))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsATank(carid)
+//{
+//	if (carid == 5)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAnAmbulance(carid)
+//{
+//	if ((carid >= 52) && (carid <= 55))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsATruck(carid)
+//{
+//	if (carid >= 108 && carid <= 111)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAPizzabike(carid)
+//{
+//	if (carid >= 102 && carid <= 107)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsABus(carid)
+//{
+//	if (carid == 59 || carid == 60)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsATowcar(carid)
+//{
+//	if (carid >= 74 && carid <= 77)
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+///*public IsAGangCar(carid)
+//{
+//if(carid >= 160 && carid <= 163)
+//{
+//return 1;
+//}
+//return 0;
+//}
+//
+//public IsAGangCar2(carid)
+//{
+//if(carid >= 164 && carid <= 167)
+//{
+//return 1;
+//}
+//return 0;
+//}
+//
+//public IsAGangCar3(carid)
+//{
+//if(carid >= 189 && carid <= 191)
+//{
+//return 1;
+//}
+//return 0;
+//}
+//
+//public IsAGangCar4(carid)
+//{
+//if(carid >= 155 && carid <= 159)
+//{
+//return 1;
+//}
+//return 0;
+//}
+//
+//public IsAGangCar5(carid)
+//{
+//if(carid >= 168 && carid <= 171)
+//{
+//return 1;
+//}
+//return 0;
+//}*/
+//
+//public IsABike(carid)
+//{
+//	if ((carid >= 102 && carid <= 107) || (carid >= 112 && carid <= 130) || (carid >= 262 && carid <= 267))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+//
+//public IsAOBike(carid)
+//{
+//	if ((carid >= 237 && carid <= 267))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
+
 public IsABoat(carid)
 {
-	if(carid == 10 || carid == 11)
-	{
+	new model = GetVehicleModel(carid);
+	if (model == 472 || model == 473 || model == 493 || model == 595 || model == 484 || model == 430 || model == 453 || model == 452 || model == 446 || model == 454)
 		return 1;
-	}
 	return 0;
 }
 
 public IsAHarvest(carid)
 {
-	if(carid == 155 || carid == 156 || carid == 157 || carid == 158)
+	if (CarInfo[carid][cType] == HARVESTVEH)
 	{
 		return 1;
 	}
@@ -4054,7 +4428,7 @@ public IsAHarvest(carid)
 
 public IsADrugHarvest(carid)
 {
-	if(carid == 159 || carid == 160 || carid == 161 || carid == 162)
+	if (CarInfo[carid][cType] == DHARVESTVEH)
 	{
 		return 1;
 	}
@@ -4063,7 +4437,7 @@ public IsADrugHarvest(carid)
 
 public IsASmuggleCar(carid)
 {
-	if(carid == 163 || carid == 164 || carid == 165)
+	if (CarInfo[carid][cType] == SMUGGLEVEH)
 	{
 		return 1;
 	}
@@ -4072,7 +4446,7 @@ public IsASmuggleCar(carid)
 
 public IsASweeper(carid)
 {
-	if((carid >= 169) && (carid <= 171))
+	if (CarInfo[carid][cType] == SWEEPERVEH)
 	{
 	    return 1;
 	}
@@ -4081,7 +4455,7 @@ public IsASweeper(carid)
 
 public IsAPlane(carid)
 {
-	if(carid == 38 || carid == 55 || carid == 73 || carid == 167 || carid == 168)
+	if (GetVehicleModel(carid) == 592 || GetVehicleModel(carid) == 577 || GetVehicleModel(carid) == 511 || GetVehicleModel(carid) == 512 || GetVehicleModel(carid) == 593 || GetVehicleModel(carid) == 520 || GetVehicleModel(carid) == 553 || GetVehicleModel(carid) == 476 || GetVehicleModel(carid) == 519 || GetVehicleModel(carid) == 460 || GetVehicleModel(carid) == 513)
 	{
 		return 1;
 	}
@@ -4090,7 +4464,7 @@ public IsAPlane(carid)
 
 public IsACopCar(carid)
 {
-	if((carid >= 16) && (carid <= 38))
+	if (CarInfo[carid][cType] == COPVEH)
 	{
 		return 1;
 	}
@@ -4099,7 +4473,7 @@ public IsACopCar(carid)
 
 public IsAnFbiCar(carid)
 {
-	if((carid >= 39) && (carid <= 43))
+	if (CarInfo[carid][cType] == FBIVEH)
 	{
 	    return 1;
 	}
@@ -4108,7 +4482,7 @@ public IsAnFbiCar(carid)
 
 public IsNgCar(carid)
 {
-	if((carid >= 1) && (carid <= 11))
+	if (CarInfo[carid][cType] == NGVEH)
 	{
 	    return 1;
 	}
@@ -4117,7 +4491,7 @@ public IsNgCar(carid)
 
 public IsAGovernmentCar(carid)
 {
-	if((carid >= 12) && (carid <= 15) || carid == 168)
+	if (CarInfo[carid][cType] == GORVEH)
 	{
 		return 1;
 	}
@@ -4126,7 +4500,7 @@ public IsAGovernmentCar(carid)
 
 public IsAHspdCar(carid)
 {
-	if((carid >= 44) && (carid <= 51))
+	if (CarInfo[carid][cType] == HSPDVEH)
 	{
 	    return 1;
 	}
@@ -4135,16 +4509,15 @@ public IsAHspdCar(carid)
 
 public IsATank(carid)
 {
-	if(carid==5)
-	{
+	if (GetVehicleModel(carid) == 432)
 		return 1;
-	}
+
 	return 0;
 }
 
 public IsAnAmbulance(carid)
 {
-	if((carid >= 52) && (carid <= 55))
+	if (CarInfo[carid][cType] == AMBUVEH)
 	{
 		return 1;
 	}
@@ -4153,7 +4526,7 @@ public IsAnAmbulance(carid)
 
 public IsATruck(carid)
 {
-	if(carid >= 108 && carid <= 111)
+	if (CarInfo[carid][cType] == TRUCKVEH)
 	{
 		return 1;
 	}
@@ -4162,7 +4535,7 @@ public IsATruck(carid)
 
 public IsAPizzabike(carid)
 {
-	if(carid >= 102 && carid <= 107)
+	if (CarInfo[carid][cType] == PIZZAVEH)
 	{
 		return 1;
 	}
@@ -4171,7 +4544,7 @@ public IsAPizzabike(carid)
 
 public IsABus(carid)
 {
-	if(carid == 59 || carid == 60)
+	if (CarInfo[carid][cType] == BUSVEH)
 	{
 		return 1;
 	}
@@ -4180,7 +4553,7 @@ public IsABus(carid)
 
 public IsATowcar(carid)
 {
-	if(carid >= 74 && carid <= 77)
+	if (CarInfo[carid][cType] == TOWVEH)
 	{
 		return 1;
 	}
@@ -4234,21 +4607,22 @@ if(carid >= 168 && carid <= 171)
 
 public IsABike(carid)
 {
-if((carid >= 102 && carid <= 107) || (carid >= 112 && carid <= 130) || (carid >= 262 && carid <= 267))
-	{
+	new vmd = GetVehicleModel(carid);
+	if (vmd == 448 || vmd == 461 || vmd == 462 || vmd == 463 || vmd == 468
+		|| vmd == 471 || vmd == 481 || vmd == 509 || vmd == 510 || vmd == 521
+		|| vmd == 522 || vmd == 523 || vmd == 581 || vmd == 586)
 		return 1;
-	}
 	return 0;
 }
 
-public IsAOBike(carid)
-{
-if((carid >= 237 && carid <= 267))
-	{
-		return 1;
-	}
-	return 0;
-}
+//public IsAOBike(carid)
+//{
+//if((carid >= 237 && carid <= 267))
+//	{
+//		return 1;
+//	}
+//	return 0;
+//}
 
 public JoinChannel(playerid, number, line[])
 {
@@ -4714,7 +5088,8 @@ public SetPlayerSpawn(playerid)
 {
 	if(IsPlayerConnected(playerid))
 	{
-	    SetPlayerSkin(playerid, PlayerInfo[playerid][pChar]);
+		if (PlayerInfo[playerid][pChar] > 0) SetPlayerSkin(playerid, PlayerInfo[playerid][pChar]);
+		else SetPlayerSkin(playerid, PlayerInfo[playerid][pModel]);
 		 if (Spectating[playerid] == 1)
 		 {
 			 SetPlayerPos(playerid, GetPVarFloat(playerid, "SX"), GetPVarFloat(playerid, "SY"), GetPVarFloat(playerid, "SZ"));
@@ -4770,6 +5145,7 @@ public SetPlayerSpawn(playerid)
 		}
 		if(PlayerInfo[playerid][pJailed] == 1)
 		{
+			SetPlayerSkin(playerid, 50);
 		    SetPlayerInterior(playerid, 6);
 		    PlayerInfo[playerid][pInt] = 6;
 			SetPlayerPos(playerid,264.6288,77.5742,1001.0391);
@@ -4778,6 +5154,7 @@ public SetPlayerSpawn(playerid)
 		}
 		if(PlayerInfo[playerid][pJailed] == 2)
 		{
+			SetPlayerSkin(playerid, 50);
 		    SetPlayerInterior(playerid, 0);
 		    PlayerInfo[playerid][pInt] = 0;
 			SetPlayerPos(playerid,268.5777,1857.9351,9.8133);
@@ -5516,9 +5893,9 @@ public SetPlayerFree(playerid,declare,reason[])
 			{
 			    if(PlayerInfo[i][pMember] == 1||PlayerInfo[i][pLeader] == 1)
 			    {
-					format(crbjstore, sizeof(crbjstore), "HQ: All Units Officer %s Has Completed Assignment",turner);
+					format(crbjstore, sizeof(crbjstore), "HQ: Tat ca don vi - Dong chi %s da hoan thanh nhiem vu",turner);
 					SendClientMessage(i, COLOR_DBLUE, crbjstore);
-					format(crbjstore, sizeof(crbjstore), "HQ: %s Has Been Processed, %s",turned,reason);
+					format(crbjstore, sizeof(crbjstore), "HQ: Doi tuong %s da duoc xu ly, toi danh: %s",turned,reason);
 					SendClientMessage(i, COLOR_DBLUE, crbjstore);
 				}
 			}
@@ -6890,26 +7267,26 @@ public SetPlayerWeapons(playerid)
 				if(OnDuty[playerid] == 1 || PlayerInfo[playerid][pMember] == 2)//Cops & FBI/ATF
 				{
 				    SafeGivePlayerWeapon(playerid, 41, 500); //spray
-					SafeGivePlayerWeapon(playerid, 24, 200);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 3, 1);
 					if(PlayerInfo[playerid][pChar] == 285)//SWAT
 					{
-					    SafeGivePlayerWeapon(playerid, 24, 200);
-					    SafeGivePlayerWeapon(playerid, 29, 450);
-						SafeGivePlayerWeapon(playerid, 31, 600);
+					    SafeGivePlayerWeapon(playerid, 24);
+					    SafeGivePlayerWeapon(playerid, 29);
+						SafeGivePlayerWeapon(playerid, 31);
 					}
 					else if(PlayerInfo[playerid][pChar] == 287)//Army
 					{
-					    SafeGivePlayerWeapon(playerid, 24, 200);
-					    SafeGivePlayerWeapon(playerid, 29, 450);
-					    SafeGivePlayerWeapon(playerid, 31, 500);
+					    SafeGivePlayerWeapon(playerid, 24);
+					    SafeGivePlayerWeapon(playerid, 29);
+					    SafeGivePlayerWeapon(playerid, 31);
 					}
 				}
 				if(PlayerInfo[playerid][pMember] == 3 || PlayerInfo[playerid][pLeader] == 3)//National Guard
 				{
-				    SafeGivePlayerWeapon(playerid, 24, 200);
-				    SafeGivePlayerWeapon(playerid, 31, 600);
-				    SafeGivePlayerWeapon(playerid, 29, 600);
+				    SafeGivePlayerWeapon(playerid, 24);
+				    SafeGivePlayerWeapon(playerid, 31);
+				    SafeGivePlayerWeapon(playerid, 29);
 				}
 			}
 			if(gTeam[playerid] >= 3)
@@ -7533,8 +7910,8 @@ public PayDay()
 		    {
 			    if(MoneyMessage[i]==1)
 				{
-				    SendClientMessage(i, COLOR_LIGHTRED, "You failed to pay your debt, Jail time.");
-				    GameTextForPlayer(i, "~r~Busted!", 2000, 1);
+				    SendClientMessage(i, COLOR_LIGHTRED, "Ban da bi bo tu vi thieu no tien chinh phu.");
+				    GameTextForPlayer(i, "~r~Bi Bat!", 2000, 1);
 				    SetPlayerInterior(i, 6);
 				    PlayerInfo[i][pInt] = 6;
 			   		SetPlayerPos(i, 264.6288,77.5742,1001.0391);
@@ -7543,7 +7920,7 @@ public PayDay()
 		            SafeResetPlayerMoney(i);
 					WantedPoints[i] = 0;
 					PlayerInfo[i][pJailTime] = 240;
-					format(string, sizeof(string), "You are jailed for %d seconds.   Bail: Unable", PlayerInfo[i][pJailTime]);
+					format(string, sizeof(string), "Ban da bi bo tu %d giay.", PlayerInfo[i][pJailTime]);
 					SendClientMessage(i, COLOR_WHITE, string);
 				}
 				new playername2[MAX_PLAYER_NAME];
@@ -7560,7 +7937,7 @@ public PayDay()
 					else if(rent > GetPlayerMoney(i))
 					{
 						PlayerInfo[i][pPhousekey] = 255;
-						SendClientMessage(i, COLOR_WHITE, "You have been evicted.");
+						SendClientMessage(i, COLOR_WHITE, "Ban da bi duoi khoi nha.");
 						rent = 0;
 					}
 					HouseInfo[key][hTakings] = HouseInfo[key][hTakings]+rent;
@@ -7604,25 +7981,25 @@ public PayDay()
 					PlayerPlayMusic(i);
 					PlayerInfo[i][pAccount] = account+interest;
 					SendClientMessage(i, COLOR_GREEN, "|___ BANK STATMENT ___|");
-					format(string, sizeof(string), "  Paycheck: $%d   Tax Money: -$%d", checks, TaxValue);
+					format(string, sizeof(string), "  Paycheck: $%d   Thue: -$%d", checks, TaxValue);
 					SendClientMessage(i, COLOR_WHITE, string);
 					if(PlayerInfo[i][pPhousekey] != 255 || PlayerInfo[i][pPbiskey] != 255)
 					{
-					    format(string, sizeof(string), "  Electricity Bill: -$%d", ebill);
+					    format(string, sizeof(string), "  Tien Dien (Nha): -$%d", ebill);
 						SendClientMessage(i, COLOR_GRAD1, string);
 					}
-					format(string, sizeof(string), "  Balance: $%d", account - checks);
+					format(string, sizeof(string), "  So Du: $%d", account - checks);
 					SendClientMessage(i, COLOR_WHITE, string);
-					format(string, sizeof(string), "  Interest Rate: 0.%d percent",tmpintrate);
+					format(string, sizeof(string), "  Lai Suat: 0.%d%",tmpintrate);
 					SendClientMessage(i, COLOR_GRAD2, string);
-					format(string, sizeof(string), "  Interest Gained $%d", interest);
+					format(string, sizeof(string), "  Lai: $%d", interest);
 					SendClientMessage(i, COLOR_GRAD3, string);
 					SendClientMessage(i, COLOR_GREEN, "|--------------------------------------|");
-					format(string, sizeof(string), "  New Balance: $%d", PlayerInfo[i][pAccount]);
+					format(string, sizeof(string), "  So Du Moi: $%d", PlayerInfo[i][pAccount]);
 					SendClientMessage(i, COLOR_GRAD5, string);
-					format(string, sizeof(string), "  Rent: -$%d", rent);
+					format(string, sizeof(string), "  Thue Nha: -$%d", rent);
 					SendClientMessage(i, COLOR_GRAD5, string);
-					format(string, sizeof(string), "~y~PayDay~n~~w~Check paid into your account");
+					format(string, sizeof(string), "~y~PayDay~n~~w~Toan bo khoang tien da duoc xu ly");
 					GameTextForPlayer(i, string, 5000, 1);
 					rent = 0;
 					PlayerInfo[i][pPayDay] = 0;
@@ -7657,6 +8034,7 @@ public PayDay()
 			}
 		}
 	}
+	UpdateDealership();
 	SaveAccounts();
 	Checkprop();
 	return 1;
@@ -7772,7 +8150,7 @@ public OnPropUpdate()
 					HouseInfo[i][hDate],
 					HouseInfo[i][hLevel],
 					HouseInfo[i][hWorld],
-					i);
+					i+1);
 		mysql_query(conn, sql);
 	}
 	//printf("Save houses successfully.");
@@ -7870,7 +8248,7 @@ public OnPropUpdate()
 				BizzInfo[i][bMaxProducts],
 				BizzInfo[i][bPriceProd],
 				BizzInfo[i][bType],
-				i);
+				i+1);
 				mysql_query(conn, sql);
 	}
 	//printf("Save business successfully.");
@@ -7912,7 +8290,7 @@ public OnPropUpdate()
 				SBizzInfo[i][sbMaxProducts],
 				SBizzInfo[i][sbPriceProd],
 				SBizzInfo[i][sbType],
-				i);
+				i+1);
 		mysql_query(conn, sql);
 	}
 	//printf("Save sbusiness successfully.");
@@ -7989,7 +8367,7 @@ public OnPropUpdate()
 
 	for (new idx = 0; idx < MAX_VEHICLES; idx++)
 	{
-		if (CarInfo[idx][cID] == -1) continue;
+		if (CarInfo[idx][cID] == -1 || CarInfo[idx][cOwned] == -1) continue;
 		format(sql, sizeof(sql), "UPDATE car SET \
 				Owner = '%s',\
 				Owned = %d,\
@@ -8003,7 +8381,8 @@ public OnPropUpdate()
 				Description = '%s',\
 				`Value` = %d,\
 				License = %d,\
-				`Lock` = %d \
+				`Lock` = %d,\
+				Type = %d \
 				WHERE ID = %d",
 				CarInfo[idx][cOwner],
 				CarInfo[idx][cOwned],
@@ -8018,6 +8397,7 @@ public OnPropUpdate()
 				CarInfo[idx][cValue],
 				CarInfo[idx][cLicense],
 				CarInfo[idx][cLock],
+				CarInfo[idx][cType],
 				CarInfo[idx][cID]);
 		mysql_query(conn, sql);
 	}			
@@ -8778,43 +9158,70 @@ public CustomPickups()
 			        {
 			            case 1:
 			            {
-			                SafeGivePlayerWeapon(i, 24, 50); SafeGivePlayerWeapon(i, 29, 500); SafeGivePlayerWeapon(i, 25, 50); SafeGivePlayerWeapon(i, 4, 1);
+			                SafeGivePlayerWeapon(i, 24);
+							SafeGivePlayerWeapon(i, 29);
+							SafeGivePlayerWeapon(i, 25);
+							SafeGivePlayerWeapon(i, 4, 1);
 			                SafeGivePlayerMoney(i, - 5000);
 			                SendClientMessage(i, COLOR_WHITE, "* You picked up your Ordered Package.");
 			            }
 			            case 2:
 			            {
-			                SafeGivePlayerWeapon(i, 24, 50); SafeGivePlayerWeapon(i, 29, 500); SafeGivePlayerWeapon(i, 25, 50); SafeGivePlayerWeapon(i, 31, 500); SafeGivePlayerWeapon(i, 4, 1);
+			                SafeGivePlayerWeapon(i, 24);
+							SafeGivePlayerWeapon(i, 29);
+							SafeGivePlayerWeapon(i, 25);
+							SafeGivePlayerWeapon(i, 31);
+							SafeGivePlayerWeapon(i, 4, 1);
 			                SafeGivePlayerMoney(i, - 6000);
 			                SendClientMessage(i, COLOR_WHITE, "* You picked up your Ordered Package.");
 			            }
 			            case 3:
 			            {
-			                SafeGivePlayerWeapon(i, 24, 50); SafeGivePlayerWeapon(i, 29, 500); SafeGivePlayerWeapon(i, 25, 50); SafeGivePlayerWeapon(i, 30, 500); SafeGivePlayerWeapon(i, 4, 1);
+			                SafeGivePlayerWeapon(i, 24);
+							SafeGivePlayerWeapon(i, 29);
+							SafeGivePlayerWeapon(i, 25);
+							SafeGivePlayerWeapon(i, 30);
+							SafeGivePlayerWeapon(i, 4, 1);
 			                SafeGivePlayerMoney(i, - 6000);
 			                SendClientMessage(i, COLOR_WHITE, "* You picked up your Ordered Package.");
 			            }
 			            case 4:
 			            {
-			                SafeGivePlayerWeapon(i, 24, 50); SafeGivePlayerWeapon(i, 29, 500); SafeGivePlayerWeapon(i, 25, 50); SafeGivePlayerWeapon(i, 31, 500); SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34, 20);
+			                SafeGivePlayerWeapon(i, 24);
+							SafeGivePlayerWeapon(i, 29);
+							SafeGivePlayerWeapon(i, 25);
+							SafeGivePlayerWeapon(i, 31);
+							SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34);
 			                SafeGivePlayerMoney(i, - 8000);
 			                SendClientMessage(i, COLOR_WHITE, "* You picked up your Ordered Package.");
 			            }
 			            case 5:
 			            {
-			                SafeGivePlayerWeapon(i, 24, 50); SafeGivePlayerWeapon(i, 29, 500); SafeGivePlayerWeapon(i, 25, 50); SafeGivePlayerWeapon(i, 30, 500); SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34, 20);
+			                SafeGivePlayerWeapon(i, 24);
+							SafeGivePlayerWeapon(i, 29);
+							SafeGivePlayerWeapon(i, 25);
+							SafeGivePlayerWeapon(i, 30);
+							SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34);
 			                SafeGivePlayerMoney(i, - 8000);
 			                SendClientMessage(i, COLOR_WHITE, "* You picked up your Ordered Package.");
 			            }
 			            case 6:
 			            {
-			                SafeGivePlayerWeapon(i, 24, 50); SafeGivePlayerWeapon(i, 29, 500); SafeGivePlayerWeapon(i, 25, 50); SafeGivePlayerWeapon(i, 31, 500); SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34, 20);
+			                SafeGivePlayerWeapon(i, 24);
+							SafeGivePlayerWeapon(i, 29);
+							SafeGivePlayerWeapon(i, 25);
+							SafeGivePlayerWeapon(i, 31);
+							SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34);
 							SafeGivePlayerMoney(i, - 8500);
 							SendClientMessage(i, COLOR_WHITE, "* You picked up your Ordered Package.");
 			            }
 			            case 7:
 			            {
-			                SafeGivePlayerWeapon(i, 24, 50); SafeGivePlayerWeapon(i, 29, 500); SafeGivePlayerWeapon(i, 25, 50); SafeGivePlayerWeapon(i, 30, 500); SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34, 20);
+			                SafeGivePlayerWeapon(i, 24);
+							SafeGivePlayerWeapon(i, 29);
+							SafeGivePlayerWeapon(i, 25);
+							SafeGivePlayerWeapon(i, 30);
+							SafeGivePlayerWeapon(i, 4, 1); SafeGivePlayerWeapon(i, 34);
 			                SafeGivePlayerMoney(i, - 8500);
 			                SendClientMessage(i, COLOR_WHITE, "* You picked up your Ordered Package.");
 			            }
@@ -10302,7 +10709,7 @@ public SafeResetPlayerMoney(plyid)
 	return 1;
 }
 
-public SafeGivePlayerWeapon(plyid, weaponid, ammo)
+stock SafeGivePlayerWeapon(plyid, weaponid, ammo = 0x7FFFFFFF)
 {
 /*	new curHour, curMinute, curSecond;
 	gettime(curHour, curMinute, curSecond);
@@ -10334,6 +10741,15 @@ public UpdateWeaponSlots(plyid)
 	return 1;
 }
 
+stock IsContainChar(const string[], cchar)
+{
+	for (new i = 0; i < strlen(string); i++)
+	{
+		if (string[i] == cchar)
+			return 1;
+	}
+	return 0;
+}
 //*public BanAdd(bantype, sqlplayerid, ip[], hackamount)
 /*public BanAdd(bantype, sqlplayerid, ip[], hackamount)
 {
@@ -10505,10 +10921,7 @@ public RemovePlayerWeapon(playerid, weaponid)
 	SafeResetPlayerWeapons(playerid);
 	for(new slot = 0; slot != 12; slot++)
 	{
-	    if(plyAmmo[slot] != 0)
-	    {
-			SafeGivePlayerWeapon(playerid, plyWeapons[slot], plyAmmo[slot]);
-		}
+		SafeGivePlayerWeapon(playerid, plyWeapons[slot]);
 	}
 	return 1;
 }
@@ -11954,7 +12367,6 @@ stock IsAdminVehicle(vid)
 	}
 	return -1;
 }
-
 stock IsAnyAdminInVehicle(vid)
 {
 	for (new i = 0; i < MAX_PLAYERS; i++)
@@ -11975,8 +12387,8 @@ stock RespawnCar(vid)
 	CarInfo[newvid][cAngle] = CarInfo[vid][cAngle];
 	CarInfo[newvid][cColorOne] = CarInfo[vid][cColorOne];
 	CarInfo[newvid][cColorTwo] = CarInfo[vid][cColorTwo];
-	format(CarInfo[vid][cOwner], 128, "%s", CarInfo[newvid][cOwner]);
-	format(CarInfo[vid][cDescription], 128, "%s", CarInfo[newvid][cDescription]);
+	format(CarInfo[newvid][cOwner], 128, "%s", CarInfo[vid][cOwner]);
+	format(CarInfo[newvid][cDescription], 128, "%s", CarInfo[vid][cDescription]);
 	CarInfo[newvid][cValue] = CarInfo[vid][cValue];
 	CarInfo[newvid][cLicense] = CarInfo[vid][cLicense];
 	CarInfo[newvid][cRegistration] = CarInfo[vid][cRegistration];
@@ -11984,6 +12396,17 @@ stock RespawnCar(vid)
 	CarInfo[newvid][cLock] = CarInfo[vid][cLock];
 	DestroyCar(vid);
 	return 1;
+}
+stock GetVehicleByCarID(id)
+{
+	for (new i = 0; i < MAX_VEHICLES; i++)
+	{
+		if (CarInfo[i][cID] == id)
+		{
+			return i;
+		}
+	}
+	return -1;
 }
 stock DestroyCar(vid)
 {
@@ -12021,7 +12444,32 @@ stock GetFirstParams(const string[], result[], len)
 	format(result, len, "%s", strtok(string, index));
 	return 1;
 }
-
+stock CountParams(const string[])
+{
+	new count = 0;
+	for (new i = 0; i < strlen(string); i++)
+	{
+		if (string[i] == ' ' && string[i + 1] != ' ')
+			count++;
+	}
+	return count;
+}
+stock IsValidIP(string[])
+{
+	new dotCount;
+	for (new i; string[i] != EOS; ++i)
+	{
+		if (('0' <= string[i] <= '9') || string[i] == '.')
+		{
+			if ((string[i] == '.') && (string[i + 1] != '.') && ('0' <= string[i - 1] <= '9'))
+			{
+				++dotCount;
+			}
+			continue;
+		}
+	}
+	return (dotCount > 2) ? 1 : 0;
+}
 CMD:veh(playerid, params[])
 {
 		 if (PlayerInfo[playerid][pAdmin] == 0) return SCM(playerid, COLOR_GREY, "Khong co quyen han su dung cau lenh nay.");
@@ -12195,9 +12643,67 @@ stock ClearApGiai(playerid)
 
 stock GetIp(playerid)
 {
-	new ip[16];
+	new ip[30];
 	GetPlayerIp(playerid, ip, sizeof(ip));
 	return ip;
+}
+
+stock IsAtATM(playerid)
+{
+	if (PlayerToPoint(1.5, playerid, 1346.5016, -1758.7649, 13.5156)
+		|| PlayerToPoint(1.5, playerid, 1592.7152, -2335.3748, 13.5400)
+		|| PlayerToPoint(1.5, playerid, 2308.4612, -1634.4176, 14.8270)
+		|| PlayerToPoint(1.5, playerid, 2865.9014, -1415.4203, 11.0061)
+		|| PlayerToPoint(1.5, playerid, 2404.5913, -1229.8973, 23.8301)
+		|| PlayerToPoint(1.5, playerid, 1172.5912, -1328.4365, 15.4034))
+		return 1;
+	return 0;
+}
+stock Replace(string[], const search[], const replacement[], bool:ignorecase = false, pos = 0, limit = -1, maxlength = sizeof(string)) {
+	// No need to do anything if the limit is 0.
+	if (limit == 0)
+		return 0;
+
+	new
+		sublen = strlen(search),
+		replen = strlen(replacement),
+		bool:packed = ispacked(string),
+		maxlen = maxlength,
+		len = strlen(string),
+		count = 0
+		;
+
+
+	// "maxlen" holds the max string length (not to be confused with "maxlength", which holds the max. array size).
+	// Since packed strings hold 4 characters per array slot, we multiply "maxlen" by 4.
+	if (packed)
+		maxlen *= 4;
+
+	// If the length of the substring is 0, we have nothing to look for..
+	if (!sublen)
+		return 0;
+
+	// In this line we both assign the return value from "strfind" to "pos" then check if it's -1.
+	while (-1 != (pos = strfind(string, search, ignorecase, pos))) {
+		// Delete the string we found
+		strdel(string, pos, pos + sublen);
+
+		len -= sublen;
+
+		// If there's anything to put as replacement, insert it. Make sure there's enough room first.
+		if (replen && len + replen < maxlen) {
+			strins(string, replacement, pos, maxlength);
+
+			pos += replen;
+			len += replen;
+		}
+
+		// Is there a limit of number of replacements, if so, did we break it?
+		if (limit != -1 && ++count >= limit)
+			break;
+	}
+
+	return count;
 }
 
 CMD:buonlau(playerid, params[])
@@ -12208,7 +12714,7 @@ CMD:buonlau(playerid, params[])
 	if (!IsPlayerInRangeOfPoint(playerid, 3, -1111.4635, -1681.5151, 76.3739)) return SCM(playerid, COLOR_GREY, "Ban khong dung o khu vuc thuong luong de buon lau (/huongdan tim O Buon Lau");
 	new drugs, str[128];
 	if (sscanf(params, "i", drugs)) return SCM(playerid, COLOR_GRAD2, "Su dung: /buonlau [so luong thuoc]");
-	if (drugs < 10 || drugs > 100) return SCM(playerid, COLOR_GREY, "Ban chi co the buon lau tu 10 den 100 thuoc mot phi vu.");
+	if (drugs < 10 || drugs > 100) return SCM(playerid, COLOR_GREY, "Ban chi co the buon lau tu 50 den 200 thuoc mot phi vu.");
 	if (PlayerInfo[playerid][pDrugs] < drugs) return SCM(playerid, COLOR_GREY, "Ban khong co du thuoc de buon lau.");
 
 	new rand = random(sizeof(BuonLauTakeCP));
@@ -12446,13 +12952,13 @@ public ChangeDrugDealer(playerid, rand)
 {
 	SCM(playerid, COLOR_WHITE, "[Stranger]: Tao da gui cho may thong tin dia diem giao dich moi, nhanh toi day va de phong may thang com!");
 	SCM(playerid, COLOR_YELLOW, "Dia diem giao dich da duoc doi, hay toi cham do moi de giao dich.");
-	SetPlayerCheckpoint(playerid, BuonLauGiveCP[rand][0], BuonLauGiveCP[rand][1], BuonLauGiveCP[rand][2], 5);
+	SetCheckpoint(playerid, BuonLauGiveCP[rand][0], BuonLauGiveCP[rand][1], BuonLauGiveCP[rand][2], 5);
 
 	foreach(Player, ddid)
 	{
 		if (CoopDD[ddid] == playerid)
 		{
-			SetPlayerCheckpoint(ddid, BuonLauGiveCP[rand][0], BuonLauGiveCP[rand][1], BuonLauGiveCP[rand][2], 5);
+			SetCheckpoint(ddid, BuonLauGiveCP[rand][0], BuonLauGiveCP[rand][1], BuonLauGiveCP[rand][2], 5);
 			SCM(playerid, COLOR_YELLOW, "Truong nhom buon lau da doi dia diem giao dich, noi giao dich moi da duoc danh dau tren ban do.");
 		}
 	}
@@ -12519,6 +13025,7 @@ public KickTime(playerid)
 #include <YSI\y_timers>
 #include <foreach>
 #include <zones>
+#include <YSI\y_ini>
 //#include <jit>
 
 #define OFFERWEAPON 1
@@ -12666,6 +13173,25 @@ new Text:TDAnimHelp;
 new SpecPlayer[MAX_PLAYERS],
 	Spectating[MAX_PLAYERS],
 	Spectated[MAX_PLAYERS];
+
+//TYPECAR
+#define HARVESTVEH 1
+#define DHARVESTVEH 2
+#define SMUGGLEVEH 3
+#define SWEEPERVEH 4
+#define COPVEH 5
+#define FBIVEH 6
+#define NGVEH 7
+#define GORVEH 8
+#define HSPDVEH 9
+#define AMBUVEH 10
+#define TRUCKVEH 11
+#define PIZZAVEH 12
+#define BUSVEH 13
+#define TOWVEH 14
+
+#define UPDLNOVEH 1
+#define UPDLVEH 2
 //../pawno/include/ProjectInc/geek.inc TM
 stock HP(playerid)
 {
@@ -13171,7 +13697,7 @@ CMD:newb(playerid, params[])
 	else
 	{
 		if (GetPVarInt(playerid, "InNewbieChannel") == 1) return SendClientMessage(playerid, COLOR_GRAD1, "Thoi gian giua hai cau hoi la 15s.");
-		format(str, sizeof(str), "%s: %s", GN(playerid), mess);
+		format(str, sizeof(str), "%s(%d): %s", GN(playerid), playerid, mess);
 		SetPVarInt(playerid, "InNewbieChannel", 1);
 		defer NewbieChannel[15000](playerid);
 	}
@@ -13250,10 +13776,16 @@ CMD:dagiup(playerid, params[])
 CMD:c(playerid, params[])
 {
 	if (PlayerInfo[playerid][pHelper] < 2 && PlayerInfo[playerid][pAdmin] < 1) return SendClientMessage(playerid, COLOR_GRAD1, "Ban khong the dung lenh nay");
-	new mess[255];
+	new mess[255], str[255];
 	if (sscanf(params, "s[255]", mess)) return SendClientMessage(playerid, COLOR_GRAD1, "/c [Noi Dung]");
-	CBroadCast(COLOR_LIGHT_BLUE, mess, 2);
-	ABroadCast(COLOR_LIGHT_BLUE, mess, 1);
+	if(PlayerInfo[playerid][pAdmin] > 0) {
+		format(str, sizeof(str), "[Admin] %s(%d): %s", GN(playerid), playerid, mess);
+	}
+	else {
+		format(str, sizeof(str), "%s %s(%d): %s", HP(playerid), GN(playerid), playerid, mess);
+	}
+	CBroadCast(COLOR_LIGHT_BLUE, str, 2);
+	ABroadCast(COLOR_LIGHT_BLUE, str, 1);
 	return 1;
 }
 CMD:plant(playerid, params[]) { return cmd_gieohat(playerid, params); }
@@ -13617,235 +14149,235 @@ public OnGameModeInit()
 	gCarLock[h+1] = 1;
 	}//34*/
 	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(596, 2779.3843, -2434.2644, 13.3568, 88.5203, 44, 86, 30000); // Army police 1
-	AddStaticVehicleEx(596, 2779.4299, -2439.7708, 13.3572, 88.1692, 44, 86, 30000); // Army police 2
-	AddStaticVehicleEx(596, 2779.1882, -2471.9214, 13.3576, 86.6550, 44, 86, 30000); // Army police 3
-	AddStaticVehicleEx(596, 2779.1497, -2477.8547, 13.3590, 86.9500, 44, 86, 30000); // Army police 4
-	AddStaticVehicleEx(432, 2791.3584, -2494.2971, 13.6588, 89.3376, 43, 0, 30000); // Army tank 5
-	AddStaticVehicleEx(470, 2792.0173, -2455.8245, 14.0688, 90, 43, 0, 30000); // Army patriot 6
-	AddStaticVehicleEx(470, 2793.1680, -2418.1855, 13.6259, 88.3914, -1, -1, 30000); // Patriot 7
-	AddStaticVehicleEx(470, 2785.0979, -2417.6987, 13.6273, 87.4559, -1, -1, 30000); //Patriot 8
-	AddStaticVehicleEx(433, 2781.4146, -2455.5208, 14.0714, 90, 43, 0, 30000); // Army truck 9
-	AddStaticVehicleEx(430, 2698.8132, -2311.0671, -0.2161, 87.3657, -1, -1, 30000); // Army boat 10
-	AddStaticVehicleEx(430, 2722.9766, -2311.2756, -0.3360, 89.2799, -1, -1, 30000); // Army boat 11
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(405, 1406.93, -1790.2, 13.3, 90, 0, 0, 30000); // Mayor security 12
-	AddStaticVehicleEx(405, 1406.9, -1793.8, 13.3, 90, 0, 0, 30000); // Mayor security 13
-	AddStaticVehicleEx(405, 1406.7, -1782.16, 13.3, 90, 0, 0, 30000); // Mayor security 14
-	AddStaticVehicleEx(409, 1405.87, -1785.96, 13.3, 90, 1, 1, 30000); // Mayor stretch 15
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(599, 616.1244, -601.7048, 17.4214, 271.5325, -1, -1, 30000); // Cop cruiser (Dillimore) 16
-	AddStaticVehicleEx(525, 1530.3849, -1645.1930, 5.7777, 179.3521, 0, 0, 30000); // Cop TowTruck 17
-	AddStaticVehicleEx(596, 1570.1555, -1710.3179, 5.6136, 358.7748, -1, -1, 30000); // Cop cruiser 18
-	AddStaticVehicleEx(596, 1574.4703, -1710.9795, 5.6115, 0.4220, -1, -1, 30000); // Cop cruiser 19
-	AddStaticVehicleEx(596, 1587.4816, -1710.3594, 5.6104, 358.9421, -1, -1, 30000); // Cop cruiser 20
-	AddStaticVehicleEx(596, 1595.6578, -1710.9442, 5.6119, 359.6335, 0, 1, 30000); // Cop cruiser 21
-	AddStaticVehicleEx(596, 1545.7845, -1684.4004, 5.6342, 271.1593, 0, 1, 30000); // Cop cruiser 22
-	AddStaticVehicleEx(596, 1558.7819, -1710.9503, 5.6119, 1.1862, 0, 1, 30000); // Cop cruiser 23
-	AddStaticVehicleEx(596, 1601.8564, -1704.1805, 5.6110, 88.9959, -1, -1, 30000); // Cop cruiser 24
-	AddStaticVehicleEx(596, 1600.9231, -1691.9321, 5.6113, 91.6221, -1, -1, 30000); // Cop cruiser 25
-	AddStaticVehicleEx(596, 1600.4153, -1687.9385, 5.6118, 90.7431, -1, -1, 30000); // Cop cruiser 26
-	AddStaticVehicleEx(596, 1529.6339, -1683.7720, 5.6124, 270.5692, 29, 29, 30000); // Cop general car 27
-	AddStaticVehicleEx(596, 1529.5374, -1688.0181, 5.6114, 270.0886, 29, 29, 30000); // Cop general car 28
-	AddStaticVehicleEx(523, 1557.9637, -1694.5964, 5.4673, 226.4766, -1, -1, 30000); // Police moto 29
-	AddStaticVehicleEx(523, 1557.9060, -1697.4153, 5.4689, 220.9842, -1, -1, 30000); // Police moto 30
-	AddStaticVehicleEx(523, 1558.1632, -1691.8335, 5.4596, 224.7542, -1, -1, 30000); // Police moto 31
-	AddStaticVehicleEx(599, 1584.6510, -1671.4448, 6.0541, 271.5708, 0, 1, 30000); // Police ranger 32
-	AddStaticVehicleEx(599, 1584.7875, -1667.6138, 6.0592, 272.0818, 0, 1, 30000); // Police ranger 33
-	AddStaticVehicleEx(599, 1545.3936, -1667.7957, 6.0809, 87.7152, 29, 29, 30000); // Police tan-white rancher 34
-	AddStaticVehicleEx(599, 1545.0044, -1671.9329, 6.0791, 91.5492, 29, 29, 30000); // Police tan-white rancher 35
-	AddStaticVehicleEx(427, 1544.2870, -1659.3522, 5.6119, 88.5025, -1, -1, 30000);// Police SWAT enforcer 36
-	AddStaticVehicleEx(601, 1544.6962, -1663.2948, 6.0225, 88.9357, -1, -1, 30000); // Police SWAT APC 37
-	AddStaticVehicleEx(497, 1566.6628, -1653.8688, 28.5752, 91.9445, 0, 1, 30000);// Police maverick 38
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(490, 1514.1959, -1478.1108, 9.6270, 270.0, -1, -1, 30000); // FBI rancher 39
-	AddStaticVehicleEx(490, 1514.1621, -1474.2642, 9.6278, 270, 0, 0, 30000); // FBI rancher 40
-	AddStaticVehicleEx(426, 1525.4424, -1461.3640, 9.2431, 0, 0, 0, 30000); // FBI elegant 41
-	AddStaticVehicleEx(426, 1520.8752, -1461.1650, 9.2430, 0, 0, 0, 30000); // FBI elegant 42
-	AddStaticVehicleEx(426, 1516.1973, -1461.1393, 9.2430, 0, 0, 0, 30000); // FBI elegant 43
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(411, 1667.8558, -1717.4535, 14.3364, 270.2589, 0, 0, 30000); // HSPD car 44
-	AddStaticVehicleEx(411, 1667.6758, -1712.7479, 14.3365, 269.3311, 0, 0, 30000); // HSPD car 45
-	AddStaticVehicleEx(411, 1667.7336, -1707.8774, 14.3364, 268.2024, 0, 0, 30000); // HSPD car 46
-	AddStaticVehicleEx(411, 1667.7771, -1702.7943, 14.3365, 267.2334, 0, 0, 30000); // HSPD car 47
-	AddStaticVehicleEx(415, 1668.1741, -1698.2887, 14.3815, 267.3284, 0, 0, 30000); // HSPD car 48
-	AddStaticVehicleEx(415, 1647.4928, -1702.9298, 14.3815, 91.1837, 0, 0, 30000); // HSPD car 49
-	AddStaticVehicleEx(415, 1647.4895, -1707.9279, 14.3800, 91.9683, 0, 0, 30000); // HSPD car 50
-	AddStaticVehicleEx(451, 1667.9532, -1693.5905, 14.3152, 270.0380, 0, 0, 30000); // HSPD car 51
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(416, 1177.35, -1339.24, 13.66, 269.58, -1, -1, 30000); // Ambulance 52
-	AddStaticVehicleEx(416, 1176.98, -1308.65, 13.62, 269.33, -1, -1, 30000); // Ambulance 53
-	AddStaticVehicleEx(416, 1189.87, -1357.14, 13.21, 180.78, -1, -1, 30000); // Ambulance 54
-	AddStaticVehicleEx(487, 1211.58, -1324.46, 13.21, 0.42, 1, 3, 30000); // Medic chopper 55
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(467, 1067.1295, -295.5681, 73.7826, 179.6040, 90, -1, 30000); // Hitman oceanic 56
-	AddStaticVehicleEx(467, 1077.3829, -295.1148, 73.7812, 180.2754, 90, -1, 30000); // Hitman oceanic 57
-	AddStaticVehicleEx(467, 1071.9189, -294.9166, 73.7250, 178.9444, 90, -1, 30000); // Hitman oceanic 58
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(431, 1172.5, -1795.5, 13.1, 0.0, -1, -1, 30000); // Bus 59
-	AddStaticVehicleEx(431, 1182.1, -1795.9, 13.1, 0.0, -1, -1, 30000); // Bus 60
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(409, 1789.4137, -1932.6389, 13.1079, 357.7568, 0, 0, 30000); // YCAT Co. Limo 61
-	AddStaticVehicleEx(421, 1803.6373, -1916.4673, 13.1141, 89.0899, 0, 0, 30000); // YCAT Co. Washington 62
-	AddStaticVehicleEx(421, 1803.6617, -1925.0874, 13.1319, 266.7457, 0, 0, 30000); // YCAT Co. Washington 63
-	AddStaticVehicleEx(420, 1800.6991, -1886.0063, 13.1462, 268.8892, -1, -1, 30000); // YCAT Co.Taxi 64
-	AddStaticVehicleEx(420, 1777.9976, -1886.0128, 13.1922, 267.6736, -1, -1, 30000); // YCAT Co. Taxi 65
-	AddStaticVehicleEx(420, 1803.7118, -1906.2510, 13.2024, 85.1059, -1, -1, 30000); // YCAT Co. Taxi 66
-	AddStaticVehicleEx(420, 1777.3717, -1896.7965, 13.1916, 270.3214, -1, -1, 30000); // YCAT Co. Taxi 67
-	AddStaticVehicleEx(420, 1796.4906, -1932.9441, 13.1914, 357.7162, -1, -1, 30000); // YCAT Co. Taxi 68
-	AddStaticVehicleEx(420, 1780.8253, -1931.8109, 13.1295, 358.2670, -1, -1, 30000); // YCAT Co. Taxi 69
-	AddStaticVehicleEx(420, 1777.6808, -1913.4772, 13.1285, 267.0958, -1, -1, 30000); // YCAT Co. Taxi 70
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(582, 1795.24, -1284.89, 13.44, 125.29, 125, 125, 30000); // News van 71
-	AddStaticVehicleEx(582, 1797.18, -1291.08, 13.27, 108.95, 125, 125, 30000); // News van 72
-	AddStaticVehicleEx(488, 1545.4849, -1353.9330, 329.6510, 185.4584, 125, 125, 30000); // News Chopper 73
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(525, 2078.74, -2006.38, 13.25, 271.64, 0, 0, 30000); // Towcar 74
-	AddStaticVehicleEx(525, 2079.06, -2019.84, 13.25, 269.24, 0, 0, 30000); // Towcar 75
-	AddStaticVehicleEx(525, 2097.83, -2006.09, 13.25, 44.15, 0, 0, 30000); // Towcar 76
-	AddStaticVehicleEx(525, 2106.72, -2015.25, 13.25, 44.15, 0, 0, 30000); // Towcar 77
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(571, 2286.2141, -2354.5000, 12.8306, 225.8705, -1, -1, 30000); // kart 78
-	AddStaticVehicleEx(571, 2279.9412, -2348.4141, 12.8312, 225.8585, -1, -1, 30000); // kart 79
-	AddStaticVehicleEx(571, 2291.7932, -2345.5356, 12.8305, 227.3060, -1, -1, 30000); // kart 80
-	AddStaticVehicleEx(571, 2287.5615, -2341.6433, 12.8306, 226.5350, -1, -1, 30000); // kart 81
-	AddStaticVehicleEx(571, 2299.6785, -2338.3186, 12.8307, 224.3563, -1, -1, 30000); // kart 82
-	AddStaticVehicleEx(571, 2295.3887, -2334.9448, 12.8307, 227.9102, -1, -1, 30000); // kart 83
-	CreateVehicle(494, -1401.0436, -210.0052, 1042.9913, 1.6623, 1, 0, 30000); //hotring 84
-	CreateVehicle(494, -1400.4019, -219.9365, 1043.0348, 5.3554, 1, 3, 30000); //hotring 85
-	CreateVehicle(494, -1394.4932, -207.7917, 1042.9963, 3.6872, 0, 6, 30000); //hotring 86
-	CreateVehicle(494, -1393.7854, -217.9354, 1043.0325, 2.9556, 1, 2, 30000); //hotring 87
-	CreateVehicle(468, -1445.6392, -592.3033, 1055.7831, 90.2133, -1, -1, 30000); //bike 88
-	CreateVehicle(468, -1433.1708, -592.4930, 1055.6533, 92.4067, -1, -1, 30000); //bike 89
-	CreateVehicle(468, -1448.5325, -584.4943, 1055.4949, 95.5400, -1, -1, 30000); //bike 90
-	CreateVehicle(468, -1434.8973, -585.1266, 1055.2488, 91.1533, -1, -1, 30000); //bike 91
-	CreateVehicle(468, -1449.2814, 1610.7823, 1052.5313, 272.9406, -1, -1, 30000); // bike 92
-	CreateVehicle(468, -1453.8767, 1611.2418, 1052.5313, 89.0355, -1, -1, 30000); // bike 93
-	CreateVehicle(468, -1454.4746, 1614.3342, 1052.5313, 86.8422, -1, -1, 30000); // bike 94
-	CreateVehicle(468, -1449.5795, 1614.0684, 1052.5313, 269.2039, -1, -1, 30000); // bike 95
-	//-------------------------------------------------------------------------------------------
-	CreateVehicle(514, -77.5039, -1108.1729, 1.6683, 161.8915, -1, -1, 30000); // truck 96
-	CreateVehicle(514, -72.3507, -1109.7822, 1.6670, 161.7769, -1, -1, 30000); // truck 97
-	CreateVehicle(514, -67.0126, -1111.7156, 1.6688, 160.4800, -1, -1, 30000); // truck 98
-	CreateVehicle(435, -51.0638, -1135.2831, 1.0781, 68.3320, -1, -1, 30000); // trailer 99
-	CreateVehicle(435, -53.6230, -1139.7546, 1.0781, 67.5604, -1, -1, 30000); // trailer 100
-	CreateVehicle(435, -55.0517, -1144.3676, 0.8018, 68.1347, -1, -1, 30000); // trailer 101
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(448, 2122, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 102
-	AddStaticVehicleEx(448, 2120, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 103
-	AddStaticVehicleEx(448, 2118, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 104
-	AddStaticVehicleEx(448, 2116, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 105
-	AddStaticVehicleEx(448, 2114, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 106
-	AddStaticVehicleEx(448, 2112, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 107
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(456, 2508.9116, -2111.7759, 13.7206, 0, -1, -1, 30000); // Component Truck Yankee 108
-	AddStaticVehicleEx(456, 2484.5356, -2111.7759, 13.7196, 0, -1, -1, 30000); // Component Truck Yankee 109
-	AddStaticVehicleEx(440, 2529.0413, -2085.3999, 13.6651, 90, -1, -1, 30000); // Component Truck Rumpo 110
-	AddStaticVehicleEx(440, 2528.9482, -2092.6104, 13.6631, 90, -1, -1, 30000); // Component Truck Rumpo 111
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(510, 1556.2643, -2361.6479, 13.1627, 6.6305, 39, 39, 30000); // Mountain bike 112
-	AddStaticVehicleEx(510, 1552.8982, -2361.8359, 13.1623, 10.5426, 16, 16, 30000); // Mountain bike 113
-	AddStaticVehicleEx(510, 1549.1460, -2362.0383, 13.1626, 5.5903, 6, 6, 30000); // Mountain bike 114
-	AddStaticVehicleEx(510, 1546.0422, -2362.0017, 13.1630, 6.6997, 5, 5, 30000); // Mountain bike 115
-	AddStaticVehicleEx(510, 1542.7434, -2361.9631, 13.1626, 15.3254, 2, 2, 30000); // Mountain bike 116
-	AddStaticVehicleEx(510, 1539.4385, -2362.1431, 13.1625, 11.8010, 43, 43, 30000); // Mountain bike 117
-	AddStaticVehicleEx(510, 1536.1389, -2362.0837, 13.1626, 12.2595, 46, 46, 30000); // Mountain bike 118
-	AddStaticVehicleEx(510, 1532.6709, -2362.2327, 13.1631, 8.4654, 39, 39, 30000); // Mountain bike 119
-	AddStaticVehicleEx(510, 1529.8967, -2362.2913, 13.1633, 3.8305, 28, 28, 30000); // Mountain bike 120
-	AddStaticVehicleEx(510, 1526.7921, -2362.0647, 13.1630, 8.0961, 16, 16, 30000); // Mountain bike 121
-	AddStaticVehicleEx(462, 1561.2104, -2338.5303, 13.1464, 107.7252, 13, 13, 30000); // Faggio 122
-	AddStaticVehicleEx(462, 1561.0819, -2335.0010, 13.1470, 94.8441, 14, 14, 30000); // Faggio 123
-	AddStaticVehicleEx(462, 1560.7794, -2331.9216, 13.1464, 96.7927, 1, 2, 30000); // Faggio 124
-	AddStaticVehicleEx(462, 1560.7391, -2328.2046, 13.1470, 92.0937, 2, 1, 30000); // Faggio 125
-	AddStaticVehicleEx(462, 1560.9022, -2325.0593, 13.1462, 91.0980, 1, 3, 30000); // Faggio 126
-	AddStaticVehicleEx(462, 1561.0276, -2321.8657, 13.1475, 95.4715, 3, 1, 30000); // Faggio 127
-	AddStaticVehicleEx(462, 1561.0735, -2318.5796, 13.1443, 97.1012, 10, 10, 30000); // Faggio 128
-	AddStaticVehicleEx(462, 1560.9514, -2315.0532, 13.1465, 94.5565, 12, 12, 30000); // Faggio 129
-	AddStaticVehicleEx(462, 1560.8143, -2311.6104, 13.1455, 95.1219, 13, 13, 30000); // Faggio 130
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(405, 2052.5889, -1903.9319, 13.4218, 180.9040, 84, 84, 30000); // Driving school 131
-	AddStaticVehicleEx(405, 2055.9761, -1903.8756, 13.4219, 179.6732, 84, 84, 30000); // Driving school 132
-	AddStaticVehicleEx(405, 2059.1111, -1903.9015, 13.4219, 180.2001, 84, 84, 30000); // Driving school 133
-	AddStaticVehicleEx(405, 2062.3347, -1903.9109, 13.4219, 179.3091, 84, 84, 30000); // Driving school 134
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(404, 1681.5526, -1035.9557, 23.6389, 180, 123, 92, 30000); // Rent car 135
-	AddStaticVehicleEx(404, 1685.3273, -1035.4058, 23.6409, 180, 101, 101, 30000); // Rent car 136
-	AddStaticVehicleEx(404, 1689.9888, -1035.6348, 23.6384, 180, 83, 110, 30000); // Rent car 137
-	AddStaticVehicleEx(401, 1694.3981, -1034.7706, 23.6860, 180, 74, 74, 30000); // Rent car 138
-	AddStaticVehicleEx(401, 1703.3409, -1044.8248, 23.6857, 0, 91, 91, 30000); // Rent car 139
-	AddStaticVehicleEx(401, 1712.7332, -1034.9132, 23.6933, 180, 41, 41, 30000); // Rent car 140
-	AddStaticVehicleEx(410, 1690.2993, -1044.3937, 23.5577, 0, 10, 1, 30000); // Rent car 141
-	AddStaticVehicleEx(410, 1681.0250, -1044.6152, 23.5528, 0, 36, 1, 30000); // Rent car 142
-	AddStaticVehicleEx(410, 1703.0122, -1035.1486, 23.5598, 180, 45, 1, 30000); // Rent car 143
-	AddStaticVehicleEx(418, 1698.9230, -1044.6398, 23.9990, 0, 114, 114, 30000); // Rent car 144
-	AddStaticVehicleEx(418, 1707.8655, -1035.1423, 24.0034, 180, 95, 95, 30000); // Rent car 145
-	AddStaticVehicleEx(418, 1698.7041, -1034.9835, 23.9997, 180, 61, 61, 30000); // Rent car 146
-	AddStaticVehicleEx(418, 1685.3434, -1044.4137, 23.9994, 0, 119, 119, 30000); // Rent car 147
-	AddStaticVehicleEx(436, 1694.5468, -1044.4786, 23.6760, 0, 92, 1, 30000); // Rent car 148
-	AddStaticVehicleEx(436, 1707.9614, -1044.8055, 23.6739, 0, 109, 1, 30000); // Rent car 149
-	AddStaticVehicleEx(436, 1712.5034, -1044.1735, 23.6731, 0, 11, 1, 30000); // Rent car 150
-	AddStaticVehicleEx(458, 1709.2091, -1061.1398, 23.7847, 180, 109, 1, 30000); // Rent car 151
-	AddStaticVehicleEx(458, 1700.3168, -1060.6760, 23.7848, 180, 4, 1, 30000); // Rent car 152
-	AddStaticVehicleEx(458, 1717.9724, -1069.8695, 23.7848, 0, 30, 1, 30000); // Rent car 153
-	AddStaticVehicleEx(458, 1691.3545, -1069.6636, 23.7849, 0, 91, 1, 30000); // Rent car 154
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(532, -387.4058, -1476.6927, 26.7035, 265.6719, 0, 0, 30000); // Harvest 155
-	AddStaticVehicleEx(532, -382.8609, -1465.2964, 26.7162, 262.4081, 0, 0, 30000); // Harvest 156
-	AddStaticVehicleEx(532, -392.8095, -1487.2607, 26.3314, 268.0157, 0, 0, 30000); // Harvest 157
-	AddStaticVehicleEx(532, -399.6307, -1500.4774, 25.4502, 265.1973, 0, 0, 30000); // Harvest 158
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(532, -54.1143, 86.1869, 4.0927, 246.1964, 16, 0, 30000); // Drug harvest 159
-	AddStaticVehicleEx(532, -39.0122, -19.7210, 4.0923, 66.2487, 16, 0, 30000); // Drug harvest 160
-	AddStaticVehicleEx(532, -34.2867, -9.5510, 4.0883, 62.7305, 16, 0, 30000); // Drug harvest 161
-	AddStaticVehicleEx(532, -83.7403, -17.7843, 4.0917, 340.3535, 16, 0, 30000); // Drug harvest 162
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(442, 1097.7876, -1327.8087, 13.1820, 2.3556, 3, 13, 30000); // Drugs smuggler car 163
-	AddStaticVehicleEx(442, 1110.4362, -1327.9688, 13.1654, 1.1852, 3, 13, 30000); // Drugs smuggler car 164
-	AddStaticVehicleEx(442, 1123.7722, -1327.3230, 13.2222, 359.7142, 3, 13, 30000); // Drugs smuggler car 165
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(407, 1750.9323, -1453.7485, 13.7822, 257.2471, 3, 1, 30000); // FireTruck 166
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(487, 1549.7140, -2430.7375, 13.7305, 154.5285, 84, 84, 30000); // School Helicopter 167
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(487, 1902.4270, -2628.4958, 13.7092, 62.7501, 0, 0, 30000); // Government Helicopter 168
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicleEx(574, 1668.6692, -1896.1118, 13.2720, 268.0269, 26, 26, 30000); // Street sweeper 169
-	AddStaticVehicleEx(574, 1668.7383, -1891.4990, 13.2720, 270.7320, 26, 26, 30000); // Street sweeper 170
-	AddStaticVehicleEx(574, 1668.7280, -1886.8180, 13.2720, 268.9658, 26, 26, 30000); // Street sweeper 171
-	//-------------------------------------------------------------------------------------------
-	AddStaticVehicle(426, 604.1163, 841.5123, -43.5796, 101.6071, 7, 7); // Reservation 172
-	AddStaticVehicle(426, 608.9548, 852.5673, -43.2947, 275.9953, 7, 7); // Reservation 173
-	AddStaticVehicle(426, 614.8525, 873.8575, -43.2182, 28.9858, 7, 7); // Reservation 174
-	AddStaticVehicle(426, 612.1263, 887.0045, -43.4468, 5.1609, 7, 7); // Reservation 175
-	AddStaticVehicle(426, 588.0759, 893.6481, -44.7892, 128.3505, 7, 7); // Reservation 176
-	AddStaticVehicle(426, 579.7737, 910.1716, -43.5148, 321.5789, 7, 7); // Reservation 177
-	AddStaticVehicle(426, 604.1163, 841.5123, -43.5796, 101.6071, 7, 7); // Reservation 178
-	AddStaticVehicle(426, 608.9548, 852.5673, -43.2947, 275.9953, 7, 7); // Reservation 179
-	AddStaticVehicle(426, 614.8525, 873.8575, -43.2182, 28.9858, 7, 7); // Reservation 180
-	AddStaticVehicle(426, 612.1263, 887.0045, -43.4468, 5.1609, 7, 7); // Reservation 181
-	AddStaticVehicle(426, 588.0759, 893.6481, -44.7892, 128.3505, 7, 7); // Reservation 182
-	AddStaticVehicle(426, 579.7737, 910.1716, -43.5148, 321.5789, 7, 7); // Reservation 183
-	//-------------------------------------------------------------------------------------------
-
+	//AddStaticVehicleEx(596, 2779.3843, -2434.2644, 13.3568, 88.5203, 44, 86, 30000); // Army police 1
+	//AddStaticVehicleEx(596, 2779.4299, -2439.7708, 13.3572, 88.1692, 44, 86, 30000); // Army police 2
+	//AddStaticVehicleEx(596, 2779.1882, -2471.9214, 13.3576, 86.6550, 44, 86, 30000); // Army police 3
+	//AddStaticVehicleEx(596, 2779.1497, -2477.8547, 13.3590, 86.9500, 44, 86, 30000); // Army police 4
+	//AddStaticVehicleEx(432, 2791.3584, -2494.2971, 13.6588, 89.3376, 43, 0, 30000); // Army tank 5
+	//AddStaticVehicleEx(470, 2792.0173, -2455.8245, 14.0688, 90, 43, 0, 30000); // Army patriot 6
+	//AddStaticVehicleEx(470, 2793.1680, -2418.1855, 13.6259, 88.3914, -1, -1, 30000); // Patriot 7
+	//AddStaticVehicleEx(470, 2785.0979, -2417.6987, 13.6273, 87.4559, -1, -1, 30000); //Patriot 8
+	//AddStaticVehicleEx(433, 2781.4146, -2455.5208, 14.0714, 90, 43, 0, 30000); // Army truck 9
+	//AddStaticVehicleEx(430, 2698.8132, -2311.0671, -0.2161, 87.3657, -1, -1, 30000); // Army boat 10
+	//AddStaticVehicleEx(430, 2722.9766, -2311.2756, -0.3360, 89.2799, -1, -1, 30000); // Army boat 11
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(405, 1406.93, -1790.2, 13.3, 90, 0, 0, 30000); // Mayor security 12
+	//AddStaticVehicleEx(405, 1406.9, -1793.8, 13.3, 90, 0, 0, 30000); // Mayor security 13
+	//AddStaticVehicleEx(405, 1406.7, -1782.16, 13.3, 90, 0, 0, 30000); // Mayor security 14
+	//AddStaticVehicleEx(409, 1405.87, -1785.96, 13.3, 90, 1, 1, 30000); // Mayor stretch 15
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(599, 616.1244, -601.7048, 17.4214, 271.5325, -1, -1, 30000); // Cop cruiser (Dillimore) 16
+	//AddStaticVehicleEx(525, 1530.3849, -1645.1930, 5.7777, 179.3521, 0, 0, 30000); // Cop TowTruck 17
+	//AddStaticVehicleEx(596, 1570.1555, -1710.3179, 5.6136, 358.7748, -1, -1, 30000); // Cop cruiser 18
+	//AddStaticVehicleEx(596, 1574.4703, -1710.9795, 5.6115, 0.4220, -1, -1, 30000); // Cop cruiser 19
+	//AddStaticVehicleEx(596, 1587.4816, -1710.3594, 5.6104, 358.9421, -1, -1, 30000); // Cop cruiser 20
+	//AddStaticVehicleEx(596, 1595.6578, -1710.9442, 5.6119, 359.6335, 0, 1, 30000); // Cop cruiser 21
+	//AddStaticVehicleEx(596, 1545.7845, -1684.4004, 5.6342, 271.1593, 0, 1, 30000); // Cop cruiser 22
+	//AddStaticVehicleEx(596, 1558.7819, -1710.9503, 5.6119, 1.1862, 0, 1, 30000); // Cop cruiser 23
+	//AddStaticVehicleEx(596, 1601.8564, -1704.1805, 5.6110, 88.9959, -1, -1, 30000); // Cop cruiser 24
+	//AddStaticVehicleEx(596, 1600.9231, -1691.9321, 5.6113, 91.6221, -1, -1, 30000); // Cop cruiser 25
+	//AddStaticVehicleEx(596, 1600.4153, -1687.9385, 5.6118, 90.7431, -1, -1, 30000); // Cop cruiser 26
+	//AddStaticVehicleEx(596, 1529.6339, -1683.7720, 5.6124, 270.5692, 29, 29, 30000); // Cop general car 27
+	//AddStaticVehicleEx(596, 1529.5374, -1688.0181, 5.6114, 270.0886, 29, 29, 30000); // Cop general car 28
+	//AddStaticVehicleEx(523, 1557.9637, -1694.5964, 5.4673, 226.4766, -1, -1, 30000); // Police moto 29
+	//AddStaticVehicleEx(523, 1557.9060, -1697.4153, 5.4689, 220.9842, -1, -1, 30000); // Police moto 30
+	//AddStaticVehicleEx(523, 1558.1632, -1691.8335, 5.4596, 224.7542, -1, -1, 30000); // Police moto 31
+	//AddStaticVehicleEx(599, 1584.6510, -1671.4448, 6.0541, 271.5708, 0, 1, 30000); // Police ranger 32
+	//AddStaticVehicleEx(599, 1584.7875, -1667.6138, 6.0592, 272.0818, 0, 1, 30000); // Police ranger 33
+	//AddStaticVehicleEx(599, 1545.3936, -1667.7957, 6.0809, 87.7152, 29, 29, 30000); // Police tan-white rancher 34
+	//AddStaticVehicleEx(599, 1545.0044, -1671.9329, 6.0791, 91.5492, 29, 29, 30000); // Police tan-white rancher 35
+	//AddStaticVehicleEx(427, 1544.2870, -1659.3522, 5.6119, 88.5025, -1, -1, 30000);// Police SWAT enforcer 36
+	//AddStaticVehicleEx(601, 1544.6962, -1663.2948, 6.0225, 88.9357, -1, -1, 30000); // Police SWAT APC 37
+	//AddStaticVehicleEx(497, 1566.6628, -1653.8688, 28.5752, 91.9445, 0, 1, 30000);// Police maverick 38
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(490, 1514.1959, -1478.1108, 9.6270, 270.0, -1, -1, 30000); // FBI rancher 39
+	//AddStaticVehicleEx(490, 1514.1621, -1474.2642, 9.6278, 270, 0, 0, 30000); // FBI rancher 40
+	//AddStaticVehicleEx(426, 1525.4424, -1461.3640, 9.2431, 0, 0, 0, 30000); // FBI elegant 41
+	//AddStaticVehicleEx(426, 1520.8752, -1461.1650, 9.2430, 0, 0, 0, 30000); // FBI elegant 42
+	//AddStaticVehicleEx(426, 1516.1973, -1461.1393, 9.2430, 0, 0, 0, 30000); // FBI elegant 43
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(411, 1667.8558, -1717.4535, 14.3364, 270.2589, 0, 0, 30000); // HSPD car 44
+	//AddStaticVehicleEx(411, 1667.6758, -1712.7479, 14.3365, 269.3311, 0, 0, 30000); // HSPD car 45
+	//AddStaticVehicleEx(411, 1667.7336, -1707.8774, 14.3364, 268.2024, 0, 0, 30000); // HSPD car 46
+	//AddStaticVehicleEx(411, 1667.7771, -1702.7943, 14.3365, 267.2334, 0, 0, 30000); // HSPD car 47
+	//AddStaticVehicleEx(415, 1668.1741, -1698.2887, 14.3815, 267.3284, 0, 0, 30000); // HSPD car 48
+	//AddStaticVehicleEx(415, 1647.4928, -1702.9298, 14.3815, 91.1837, 0, 0, 30000); // HSPD car 49
+	//AddStaticVehicleEx(415, 1647.4895, -1707.9279, 14.3800, 91.9683, 0, 0, 30000); // HSPD car 50
+	//AddStaticVehicleEx(451, 1667.9532, -1693.5905, 14.3152, 270.0380, 0, 0, 30000); // HSPD car 51
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(416, 1177.35, -1339.24, 13.66, 269.58, -1, -1, 30000); // Ambulance 52
+	//AddStaticVehicleEx(416, 1176.98, -1308.65, 13.62, 269.33, -1, -1, 30000); // Ambulance 53
+	//AddStaticVehicleEx(416, 1189.87, -1357.14, 13.21, 180.78, -1, -1, 30000); // Ambulance 54
+	//AddStaticVehicleEx(487, 1211.58, -1324.46, 13.21, 0.42, 1, 3, 30000); // Medic chopper 55
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(467, 1067.1295, -295.5681, 73.7826, 179.6040, 90, -1, 30000); // Hitman oceanic 56
+	//AddStaticVehicleEx(467, 1077.3829, -295.1148, 73.7812, 180.2754, 90, -1, 30000); // Hitman oceanic 57
+	//AddStaticVehicleEx(467, 1071.9189, -294.9166, 73.7250, 178.9444, 90, -1, 30000); // Hitman oceanic 58
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(431, 1172.5, -1795.5, 13.1, 0.0, -1, -1, 30000); // Bus 59
+	//AddStaticVehicleEx(431, 1182.1, -1795.9, 13.1, 0.0, -1, -1, 30000); // Bus 60
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(409, 1789.4137, -1932.6389, 13.1079, 357.7568, 0, 0, 30000); // YCAT Co. Limo 61
+	//AddStaticVehicleEx(421, 1803.6373, -1916.4673, 13.1141, 89.0899, 0, 0, 30000); // YCAT Co. Washington 62
+	//AddStaticVehicleEx(421, 1803.6617, -1925.0874, 13.1319, 266.7457, 0, 0, 30000); // YCAT Co. Washington 63
+	//AddStaticVehicleEx(420, 1800.6991, -1886.0063, 13.1462, 268.8892, -1, -1, 30000); // YCAT Co.Taxi 64
+	//AddStaticVehicleEx(420, 1777.9976, -1886.0128, 13.1922, 267.6736, -1, -1, 30000); // YCAT Co. Taxi 65
+	//AddStaticVehicleEx(420, 1803.7118, -1906.2510, 13.2024, 85.1059, -1, -1, 30000); // YCAT Co. Taxi 66
+	//AddStaticVehicleEx(420, 1777.3717, -1896.7965, 13.1916, 270.3214, -1, -1, 30000); // YCAT Co. Taxi 67
+	//AddStaticVehicleEx(420, 1796.4906, -1932.9441, 13.1914, 357.7162, -1, -1, 30000); // YCAT Co. Taxi 68
+	//AddStaticVehicleEx(420, 1780.8253, -1931.8109, 13.1295, 358.2670, -1, -1, 30000); // YCAT Co. Taxi 69
+	//AddStaticVehicleEx(420, 1777.6808, -1913.4772, 13.1285, 267.0958, -1, -1, 30000); // YCAT Co. Taxi 70
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(582, 1795.24, -1284.89, 13.44, 125.29, 125, 125, 30000); // News van 71
+	//AddStaticVehicleEx(582, 1797.18, -1291.08, 13.27, 108.95, 125, 125, 30000); // News van 72
+	//AddStaticVehicleEx(488, 1545.4849, -1353.9330, 329.6510, 185.4584, 125, 125, 30000); // News Chopper 73
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(525, 2078.74, -2006.38, 13.25, 271.64, 0, 0, 30000); // Towcar 74
+	//AddStaticVehicleEx(525, 2079.06, -2019.84, 13.25, 269.24, 0, 0, 30000); // Towcar 75
+	//AddStaticVehicleEx(525, 2097.83, -2006.09, 13.25, 44.15, 0, 0, 30000); // Towcar 76
+	//AddStaticVehicleEx(525, 2106.72, -2015.25, 13.25, 44.15, 0, 0, 30000); // Towcar 77
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(571, 2286.2141, -2354.5000, 12.8306, 225.8705, -1, -1, 30000); // kart 78
+	//AddStaticVehicleEx(571, 2279.9412, -2348.4141, 12.8312, 225.8585, -1, -1, 30000); // kart 79
+	//AddStaticVehicleEx(571, 2291.7932, -2345.5356, 12.8305, 227.3060, -1, -1, 30000); // kart 80
+	//AddStaticVehicleEx(571, 2287.5615, -2341.6433, 12.8306, 226.5350, -1, -1, 30000); // kart 81
+	//AddStaticVehicleEx(571, 2299.6785, -2338.3186, 12.8307, 224.3563, -1, -1, 30000); // kart 82
+	//AddStaticVehicleEx(571, 2295.3887, -2334.9448, 12.8307, 227.9102, -1, -1, 30000); // kart 83
+	//CreateVehicle(494, -1401.0436, -210.0052, 1042.9913, 1.6623, 1, 0, 30000); //hotring 84
+	//CreateVehicle(494, -1400.4019, -219.9365, 1043.0348, 5.3554, 1, 3, 30000); //hotring 85
+	//CreateVehicle(494, -1394.4932, -207.7917, 1042.9963, 3.6872, 0, 6, 30000); //hotring 86
+	//CreateVehicle(494, -1393.7854, -217.9354, 1043.0325, 2.9556, 1, 2, 30000); //hotring 87
+	//CreateVehicle(468, -1445.6392, -592.3033, 1055.7831, 90.2133, -1, -1, 30000); //bike 88
+	//CreateVehicle(468, -1433.1708, -592.4930, 1055.6533, 92.4067, -1, -1, 30000); //bike 89
+	//CreateVehicle(468, -1448.5325, -584.4943, 1055.4949, 95.5400, -1, -1, 30000); //bike 90
+	//CreateVehicle(468, -1434.8973, -585.1266, 1055.2488, 91.1533, -1, -1, 30000); //bike 91
+	//CreateVehicle(468, -1449.2814, 1610.7823, 1052.5313, 272.9406, -1, -1, 30000); // bike 92
+	//CreateVehicle(468, -1453.8767, 1611.2418, 1052.5313, 89.0355, -1, -1, 30000); // bike 93
+	//CreateVehicle(468, -1454.4746, 1614.3342, 1052.5313, 86.8422, -1, -1, 30000); // bike 94
+	//CreateVehicle(468, -1449.5795, 1614.0684, 1052.5313, 269.2039, -1, -1, 30000); // bike 95
+	////-------------------------------------------------------------------------------------------
+	//CreateVehicle(514, -77.5039, -1108.1729, 1.6683, 161.8915, -1, -1, 30000); // truck 96
+	//CreateVehicle(514, -72.3507, -1109.7822, 1.6670, 161.7769, -1, -1, 30000); // truck 97
+	//CreateVehicle(514, -67.0126, -1111.7156, 1.6688, 160.4800, -1, -1, 30000); // truck 98
+	//CreateVehicle(435, -51.0638, -1135.2831, 1.0781, 68.3320, -1, -1, 30000); // trailer 99
+	//CreateVehicle(435, -53.6230, -1139.7546, 1.0781, 67.5604, -1, -1, 30000); // trailer 100
+	//CreateVehicle(435, -55.0517, -1144.3676, 0.8018, 68.1347, -1, -1, 30000); // trailer 101
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(448, 2122, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 102
+	//AddStaticVehicleEx(448, 2120, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 103
+	//AddStaticVehicleEx(448, 2118, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 104
+	//AddStaticVehicleEx(448, 2116, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 105
+	//AddStaticVehicleEx(448, 2114, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 106
+	//AddStaticVehicleEx(448, 2112, -1784.1558, 12.9844, 0.9122, 3, 6, 30000); // PizzaBoy 107
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(456, 2508.9116, -2111.7759, 13.7206, 0, -1, -1, 30000); // Component Truck Yankee 108
+	//AddStaticVehicleEx(456, 2484.5356, -2111.7759, 13.7196, 0, -1, -1, 30000); // Component Truck Yankee 109
+	//AddStaticVehicleEx(440, 2529.0413, -2085.3999, 13.6651, 90, -1, -1, 30000); // Component Truck Rumpo 110
+	//AddStaticVehicleEx(440, 2528.9482, -2092.6104, 13.6631, 90, -1, -1, 30000); // Component Truck Rumpo 111
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(510, 1556.2643, -2361.6479, 13.1627, 6.6305, 39, 39, 30000); // Mountain bike 112
+	//AddStaticVehicleEx(510, 1552.8982, -2361.8359, 13.1623, 10.5426, 16, 16, 30000); // Mountain bike 113
+	//AddStaticVehicleEx(510, 1549.1460, -2362.0383, 13.1626, 5.5903, 6, 6, 30000); // Mountain bike 114
+	//AddStaticVehicleEx(510, 1546.0422, -2362.0017, 13.1630, 6.6997, 5, 5, 30000); // Mountain bike 115
+	//AddStaticVehicleEx(510, 1542.7434, -2361.9631, 13.1626, 15.3254, 2, 2, 30000); // Mountain bike 116
+	//AddStaticVehicleEx(510, 1539.4385, -2362.1431, 13.1625, 11.8010, 43, 43, 30000); // Mountain bike 117
+	//AddStaticVehicleEx(510, 1536.1389, -2362.0837, 13.1626, 12.2595, 46, 46, 30000); // Mountain bike 118
+	//AddStaticVehicleEx(510, 1532.6709, -2362.2327, 13.1631, 8.4654, 39, 39, 30000); // Mountain bike 119
+	//AddStaticVehicleEx(510, 1529.8967, -2362.2913, 13.1633, 3.8305, 28, 28, 30000); // Mountain bike 120
+	//AddStaticVehicleEx(510, 1526.7921, -2362.0647, 13.1630, 8.0961, 16, 16, 30000); // Mountain bike 121
+	//AddStaticVehicleEx(462, 1561.2104, -2338.5303, 13.1464, 107.7252, 13, 13, 30000); // Faggio 122
+	//AddStaticVehicleEx(462, 1561.0819, -2335.0010, 13.1470, 94.8441, 14, 14, 30000); // Faggio 123
+	//AddStaticVehicleEx(462, 1560.7794, -2331.9216, 13.1464, 96.7927, 1, 2, 30000); // Faggio 124
+	//AddStaticVehicleEx(462, 1560.7391, -2328.2046, 13.1470, 92.0937, 2, 1, 30000); // Faggio 125
+	//AddStaticVehicleEx(462, 1560.9022, -2325.0593, 13.1462, 91.0980, 1, 3, 30000); // Faggio 126
+	//AddStaticVehicleEx(462, 1561.0276, -2321.8657, 13.1475, 95.4715, 3, 1, 30000); // Faggio 127
+	//AddStaticVehicleEx(462, 1561.0735, -2318.5796, 13.1443, 97.1012, 10, 10, 30000); // Faggio 128
+	//AddStaticVehicleEx(462, 1560.9514, -2315.0532, 13.1465, 94.5565, 12, 12, 30000); // Faggio 129
+	//AddStaticVehicleEx(462, 1560.8143, -2311.6104, 13.1455, 95.1219, 13, 13, 30000); // Faggio 130
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(405, 2052.5889, -1903.9319, 13.4218, 180.9040, 84, 84, 30000); // Driving school 131
+	//AddStaticVehicleEx(405, 2055.9761, -1903.8756, 13.4219, 179.6732, 84, 84, 30000); // Driving school 132
+	//AddStaticVehicleEx(405, 2059.1111, -1903.9015, 13.4219, 180.2001, 84, 84, 30000); // Driving school 133
+	//AddStaticVehicleEx(405, 2062.3347, -1903.9109, 13.4219, 179.3091, 84, 84, 30000); // Driving school 134
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(404, 1681.5526, -1035.9557, 23.6389, 180, 123, 92, 30000); // Rent car 135
+	//AddStaticVehicleEx(404, 1685.3273, -1035.4058, 23.6409, 180, 101, 101, 30000); // Rent car 136
+	//AddStaticVehicleEx(404, 1689.9888, -1035.6348, 23.6384, 180, 83, 110, 30000); // Rent car 137
+	//AddStaticVehicleEx(401, 1694.3981, -1034.7706, 23.6860, 180, 74, 74, 30000); // Rent car 138
+	//AddStaticVehicleEx(401, 1703.3409, -1044.8248, 23.6857, 0, 91, 91, 30000); // Rent car 139
+	//AddStaticVehicleEx(401, 1712.7332, -1034.9132, 23.6933, 180, 41, 41, 30000); // Rent car 140
+	//AddStaticVehicleEx(410, 1690.2993, -1044.3937, 23.5577, 0, 10, 1, 30000); // Rent car 141
+	//AddStaticVehicleEx(410, 1681.0250, -1044.6152, 23.5528, 0, 36, 1, 30000); // Rent car 142
+	//AddStaticVehicleEx(410, 1703.0122, -1035.1486, 23.5598, 180, 45, 1, 30000); // Rent car 143
+	//AddStaticVehicleEx(418, 1698.9230, -1044.6398, 23.9990, 0, 114, 114, 30000); // Rent car 144
+	//AddStaticVehicleEx(418, 1707.8655, -1035.1423, 24.0034, 180, 95, 95, 30000); // Rent car 145
+	//AddStaticVehicleEx(418, 1698.7041, -1034.9835, 23.9997, 180, 61, 61, 30000); // Rent car 146
+	//AddStaticVehicleEx(418, 1685.3434, -1044.4137, 23.9994, 0, 119, 119, 30000); // Rent car 147
+	//AddStaticVehicleEx(436, 1694.5468, -1044.4786, 23.6760, 0, 92, 1, 30000); // Rent car 148
+	//AddStaticVehicleEx(436, 1707.9614, -1044.8055, 23.6739, 0, 109, 1, 30000); // Rent car 149
+	//AddStaticVehicleEx(436, 1712.5034, -1044.1735, 23.6731, 0, 11, 1, 30000); // Rent car 150
+	//AddStaticVehicleEx(458, 1709.2091, -1061.1398, 23.7847, 180, 109, 1, 30000); // Rent car 151
+	//AddStaticVehicleEx(458, 1700.3168, -1060.6760, 23.7848, 180, 4, 1, 30000); // Rent car 152
+	//AddStaticVehicleEx(458, 1717.9724, -1069.8695, 23.7848, 0, 30, 1, 30000); // Rent car 153
+	//AddStaticVehicleEx(458, 1691.3545, -1069.6636, 23.7849, 0, 91, 1, 30000); // Rent car 154
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(532, -387.4058, -1476.6927, 26.7035, 265.6719, 0, 0, 30000); // Harvest 155
+	//AddStaticVehicleEx(532, -382.8609, -1465.2964, 26.7162, 262.4081, 0, 0, 30000); // Harvest 156
+	//AddStaticVehicleEx(532, -392.8095, -1487.2607, 26.3314, 268.0157, 0, 0, 30000); // Harvest 157
+	//AddStaticVehicleEx(532, -399.6307, -1500.4774, 25.4502, 265.1973, 0, 0, 30000); // Harvest 158
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(532, -54.1143, 86.1869, 4.0927, 246.1964, 16, 0, 30000); // Drug harvest 159
+	//AddStaticVehicleEx(532, -39.0122, -19.7210, 4.0923, 66.2487, 16, 0, 30000); // Drug harvest 160
+	//AddStaticVehicleEx(532, -34.2867, -9.5510, 4.0883, 62.7305, 16, 0, 30000); // Drug harvest 161
+	//AddStaticVehicleEx(532, -83.7403, -17.7843, 4.0917, 340.3535, 16, 0, 30000); // Drug harvest 162
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(442, 1097.7876, -1327.8087, 13.1820, 2.3556, 3, 13, 30000); // Drugs smuggler car 163
+	//AddStaticVehicleEx(442, 1110.4362, -1327.9688, 13.1654, 1.1852, 3, 13, 30000); // Drugs smuggler car 164
+	//AddStaticVehicleEx(442, 1123.7722, -1327.3230, 13.2222, 359.7142, 3, 13, 30000); // Drugs smuggler car 165
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(407, 1750.9323, -1453.7485, 13.7822, 257.2471, 3, 1, 30000); // FireTruck 166
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(487, 1549.7140, -2430.7375, 13.7305, 154.5285, 84, 84, 30000); // School Helicopter 167
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(487, 1902.4270, -2628.4958, 13.7092, 62.7501, 0, 0, 30000); // Government Helicopter 168
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicleEx(574, 1668.6692, -1896.1118, 13.2720, 268.0269, 26, 26, 30000); // Street sweeper 169
+	//AddStaticVehicleEx(574, 1668.7383, -1891.4990, 13.2720, 270.7320, 26, 26, 30000); // Street sweeper 170
+	//AddStaticVehicleEx(574, 1668.7280, -1886.8180, 13.2720, 268.9658, 26, 26, 30000); // Street sweeper 171
+	////-------------------------------------------------------------------------------------------
+	//AddStaticVehicle(426, 604.1163, 841.5123, -43.5796, 101.6071, 7, 7); // Reservation 172
+	//AddStaticVehicle(426, 608.9548, 852.5673, -43.2947, 275.9953, 7, 7); // Reservation 173
+	//AddStaticVehicle(426, 614.8525, 873.8575, -43.2182, 28.9858, 7, 7); // Reservation 174
+	//AddStaticVehicle(426, 612.1263, 887.0045, -43.4468, 5.1609, 7, 7); // Reservation 175
+	//AddStaticVehicle(426, 588.0759, 893.6481, -44.7892, 128.3505, 7, 7); // Reservation 176
+	//AddStaticVehicle(426, 579.7737, 910.1716, -43.5148, 321.5789, 7, 7); // Reservation 177
+	//AddStaticVehicle(426, 604.1163, 841.5123, -43.5796, 101.6071, 7, 7); // Reservation 178
+	//AddStaticVehicle(426, 608.9548, 852.5673, -43.2947, 275.9953, 7, 7); // Reservation 179
+	//AddStaticVehicle(426, 614.8525, 873.8575, -43.2182, 28.9858, 7, 7); // Reservation 180
+	//AddStaticVehicle(426, 612.1263, 887.0045, -43.4468, 5.1609, 7, 7); // Reservation 181
+	//AddStaticVehicle(426, 588.0759, 893.6481, -44.7892, 128.3505, 7, 7); // Reservation 182
+	//AddStaticVehicle(426, 579.7737, 910.1716, -43.5148, 321.5789, 7, 7); // Reservation 183
+	////-------------------------------------------------------------------------------------------
 	//////////////Text draw
+	//InsertVeh();
 	OnAnimtInit();
-	for (new h = 184; h < sizeof(CarInfo); h++)
-	{
-		AddStaticVehicleEx(CarInfo[h][cModel], CarInfo[h][cLocationx], CarInfo[h][cLocationy], CarInfo[h][cLocationz] + 1.0, CarInfo[h][cAngle], CarInfo[h][cColorOne], CarInfo[h][cColorTwo], 60000);
-	}
-	LinkVehicleToInterior(84, 7);
-	LinkVehicleToInterior(85, 7);
-	LinkVehicleToInterior(86, 7);
-	LinkVehicleToInterior(87, 7);
-	LinkVehicleToInterior(88, 4);
-	LinkVehicleToInterior(89, 4);
-	LinkVehicleToInterior(90, 4);
-	LinkVehicleToInterior(91, 4);
-	LinkVehicleToInterior(92, 14);
-	LinkVehicleToInterior(93, 14);
-	LinkVehicleToInterior(94, 14);
-	LinkVehicleToInterior(95, 14);
-	LinkVehicleToInterior(96, 14);
+	//for (new h = 184; h < sizeof(CarInfo); h++)
+	//{
+	//	AddStaticVehicleEx(CarInfo[h][cModel], CarInfo[h][cLocationx], CarInfo[h][cLocationy], CarInfo[h][cLocationz] + 1.0, CarInfo[h][cAngle], CarInfo[h][cColorOne], CarInfo[h][cColorTwo], 60000);
+	//}
+	//LinkVehicleToInterior(84, 7);
+	//LinkVehicleToInterior(85, 7);
+	//LinkVehicleToInterior(86, 7);
+	//LinkVehicleToInterior(87, 7);
+	//LinkVehicleToInterior(88, 4);
+	//LinkVehicleToInterior(89, 4);
+	//LinkVehicleToInterior(90, 4);
+	//LinkVehicleToInterior(91, 4);
+	//LinkVehicleToInterior(92, 14);
+	//LinkVehicleToInterior(93, 14);
+	//LinkVehicleToInterior(94, 14);
+	//LinkVehicleToInterior(95, 14);
+	//LinkVehicleToInterior(96, 14);
 	for (new h = 0; h < sizeof(HouseInfo); h++)
 	{
 		if (HouseInfo[h][hOwned] == 0)
@@ -14046,6 +14578,7 @@ public OnGameModeInit()
 }
 public OnPlayerConnect(playerid)
 {
+	CheckBan(playerid);
 	new plname[MAX_PLAYER_NAME];
 	GetPlayerName(playerid, plname, sizeof(plname));
 	if (Security != 0)
@@ -14602,7 +15135,7 @@ public OnPlayerInteriorChange(playerid, newinteriorid, oldinteriorid)
 }
 public OnPlayerEnterVehicle(playerid, vehicleid, ispassenger)
 {
-	if (IsAdminVehicle(vehicleid) >= 0) return 1;
+	if (IsAdminVehicle(vehicleid) != -1) return 1;
 	if (gTeam[playerid] >= 1 || gTeam[playerid] >= 3 || gTeam[playerid] >= 4)
 	{
 		if (IsACopCar(vehicleid) && !ispassenger)
@@ -14695,11 +15228,18 @@ public delayfaildd(playerid, killerid)
 	if (DrugDealing[playerid] > 0)
 	{
 		new str[128];
-		new money = DrugDealer[playerid] * 7000;
-		format(str, sizeof(str), "** [Tong dai]: %s da ban ha doi tuong buon lau %s, tich thu %d gram thuoc, tuong ung %d$. **", GN(killerid), GN(playerid), DrugDealer[playerid], money);
-		SendRadioMessage(1, TEAM_RADIO_COLOR, str);
-		SafeGivePlayerMoney(killerid, money);
-
+		if (killerid != INVALID_PLAYER_ID)
+		{
+			new money = DrugDealer[playerid] * 7000;
+			format(str, sizeof(str), "** [Tong dai]: %s da ban ha doi tuong buon lau %s, tich thu %d gram thuoc, tuong ung %d$. **", GN(killerid), GN(playerid), DrugDealer[playerid], money);
+			SendRadioMessage(1, TEAM_RADIO_COLOR, str);
+			SafeGivePlayerMoney(killerid, money);
+		}
+		else
+		{
+			format(str, sizeof(str), "** [Tong dai]: Doi tuong buon lau %s da tu sat, so thuoc bi tieu huy. **", GN(killerid));
+			SendRadioMessage(1, TEAM_RADIO_COLOR, str);
+		}
 		DDTime[playerid] = 0;
 		DrugDealing[playerid] = 0;
 		DrugDealer[playerid] = 0;
@@ -14715,7 +15255,7 @@ public delayfaildd(playerid, killerid)
 public OnPlayerDeath(playerid, killerid, reason)
 {
 	//printf("Dying: %d", Dying[playerid]);
-	if (Dying[playerid] == 0)
+	if (Dying[playerid] == 0 && PlayerInfo[playerid][pJailed] == 0)
 	{
 		Dying[playerid] = 1;
 		DyingTimeOut[playerid] = 30;
@@ -15348,8 +15888,9 @@ public OnPlayerEnterCheckpoint(playerid)
 		DisableCheckpoint(playerid);
 		return 1;
 	}
-	if (DrugDealing[playerid] == 1 && GetPlayerState(playerid) == PLAYER_STATE_DRIVER)
+	if (DrugDealing[playerid] == 1)
 	{
+		if (GetPlayerState(playerid) != PLAYER_STATE_DRIVER) return 1;
 		for (new i = 0; i<sizeof(BuonLauTakeCP); i++)
 		{
 			new vid = GetPlayerVehicleID(playerid);
@@ -15381,9 +15922,11 @@ public OnPlayerEnterCheckpoint(playerid)
 				return 1;
 			}
 		}
+		return 1;
 	}
-	if (DrugDealing[playerid] == 3 && GetPlayerState(playerid) == PLAYER_STATE_DRIVER)
+	if (DrugDealing[playerid] == 3)
 	{
+		if (GetPlayerState(playerid) != PLAYER_STATE_DRIVER) return 1;
 		for (new i = 0; i<sizeof(BuonLauGiveCP); i++)
 		{
 			if (IsPlayerInRangeOfPoint(playerid, 5, BuonLauGiveCP[i][0], BuonLauGiveCP[i][1], BuonLauGiveCP[i][2]))
@@ -17400,7 +17943,7 @@ public OnPlayerStateChange(playerid, newstate, oldstate)
 			if (Spectating[i] == 1 && SpecPlayer[i] == playerid)
 			{
 				new vid = GetPlayerVehicleID(playerid);
-				PlayerSpectateVehicle(i, vid, SPECTATE_MODE_NORMAL);
+				PlayerSpectateVehicle(i, vid);
 			}
 		}
 		return 1;
@@ -17554,7 +18097,7 @@ public OnPlayerStateChange(playerid, newstate, oldstate)
 					if (gTeam[i] == 2 && CrimInRange(30.0, playerid, i))
 					{
 						count = 1;
-						format(string, sizeof(string), "~w~Doi tuong da bi ha guc~r~Killed~n~Bonus~g~$%d", price);
+						format(string, sizeof(string), "~w~Doi tuong da bi ha guc~r~Tien~n~Thuong~g~$%d", price);
 						GameTextForPlayer(i, string, 5000, 1);
 						//ConsumingMoney[i] = 1;
 						SafeGivePlayerMoney(i, price / 2);
@@ -17623,7 +18166,8 @@ public OnPlayerStateChange(playerid, newstate, oldstate)
 
 			if (PlayerInfo[playerid][pCarLic] < 1)
 			{
-				if (IsABike(newcar) || IsAOBike(newcar)) {}
+				//if (IsABike(newcar) || IsAOBike(newcar)) {}
+				if (IsABike(newcar)) {}
 				else
 				{
 					/*if(PlayerInfo[playerid][pCarLic] < 1)
@@ -17978,20 +18522,14 @@ public OnPlayerStateChange(playerid, newstate, oldstate)
 				RemovePlayerFromVehicle(playerid);
 				SendClientMessage(playerid, COLOR_GREY, "You don't have a key of this vehicle");
 				}*/
-				if (GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][0]) == vehicle) {}
-				else if (GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][1]) == vehicle) {}
-				else if (GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][2]) == vehicle) {}
-				else
+				if (PlayerInfo[playerid][pAdmin] >= 1337 && AdminDuty[playerid] == 1)
+					SendClientMessage(playerid, COLOR_GREY, "  Ban co the chay xe nay do ban la admin !");
+				else if (GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][0]) != vehicle
+					&& GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][1]) != vehicle
+					&& GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][2]) != vehicle)
 				{
-					if (PlayerInfo[playerid][pAdmin] >= 1337 && AdminDuty[playerid] == 1)
-					{
-						SendClientMessage(playerid, COLOR_GREY, "  Ban co the chay xe nay do ban la admin !");
-					}
-					else
-					{
-						RemovePlayerFromVehicle(playerid);
-						SendClientMessage(playerid, COLOR_GREY, "Ban khong co chia khoa phuong tien nay");
-					}
+					RemovePlayerFromVehicle(playerid);
+					SendClientMessage(playerid, COLOR_GREY, "Ban khong co chia khoa phuong tien nay");
 				}
 			}
 		}
@@ -18521,12 +19059,12 @@ public OnPlayerKeyStateChange(playerid, newkeys, oldkeys)
 	new string[256];
 	new pveh = GetVehicleModel(GetPlayerVehicleID(playerid));
 	new newcar = GetPlayerVehicleID(playerid);
-	if (newkeys == KEY_JUMP)
+	if (newkeys == KEY_JUMP && IsAdminVehicle(newcar) == -1)
 	{
-		if (IsPlayerInAnyVehicle(playerid) && IsAdminVehicle(pveh) != -1 && !IsAnOwnableCar(pveh))
+		if (IsPlayerInAnyVehicle(playerid))
 		{
 			if (IsPlayerConnected(playerid))
-			{
+			{	
 				if (!engineOn[GetPlayerVehicleID(playerid)])
 				{
 					if (GetPlayerState(playerid) == PLAYER_STATE_PASSENGER)
@@ -18534,7 +19072,7 @@ public OnPlayerKeyStateChange(playerid, newkeys, oldkeys)
 						return 1;
 					}
 					if (IsAnOwnableCar(newcar))
-					{
+					{	
 						if (GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][0]) == newcar) {}
 						else if (GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][1]) == newcar) {}
 						else if (GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][2]) == newcar) {}
@@ -18921,44 +19459,35 @@ public OnPlayerText(playerid, text[])
 			format(string, sizeof(string), "Ban hien nay %d tuoi.", PlayerInfo[playerid][pAge]);
 			SendClientMessage(playerid, COLOR_YELLOW2, string);
 			RegistrationStep[playerid] = 3;
-			SendClientMessage(playerid, COLOR_LIGHTRED, "Ban hien dang sinh song o? (Go: USA, Europe, Asia hoac Africa)");
+			SendClientMessage(playerid, COLOR_LIGHTRED, "Ban hien dang sinh song o? (Go: bac, trung hoac nam)");
 			return 0;
 		}
 		else if (RegistrationStep[playerid] == 3)
 		{
 			new idx;
 			tmp = strtok(text, idx);
-			if ((strcmp("usa", tmp, true, strlen(tmp)) == 0) && (strlen(tmp) == strlen("usa")))
+			if ((strcmp("usa", tmp, true, strlen(tmp)) == 0) && (strlen(tmp) == strlen("bac")))
 			{
 				PlayerInfo[playerid][pOrigin] = 1;
-				SendClientMessage(playerid, COLOR_YELLOW2, "Ban da khai bao minh den tu USA.");
+				SendClientMessage(playerid, COLOR_YELLOW2, "Ban da khai bao minh den tu Mien Bac.");
 				SendClientMessage(playerid, COLOR_LIGHTRED, "Cam on ban da tra loi cau hoi cua chung toi, chung ta se bat dau phan huong dan.");
 				RegistrationStep[playerid] = 0;
 				TutTime[playerid] = 1;
 				return 0;
 			}
-			else if ((strcmp("europe", tmp, true, strlen(tmp)) == 0) && (strlen(tmp) == strlen("")))
+			else if ((strcmp("trung", tmp, true, strlen(tmp)) == 0) && (strlen(tmp) == strlen("trung")))
 			{
 				PlayerInfo[playerid][pOrigin] = 2;
-				SendClientMessage(playerid, COLOR_YELLOW2, "Ban da khai bao minh den tu Europe.");
+				SendClientMessage(playerid, COLOR_YELLOW2, "Ban da khai bao minh den tu Mien Trung.");
 				SendClientMessage(playerid, COLOR_LIGHTRED, "Cam on ban da tra loi cau hoi cua chung toi, chung ta se bat dau phan huong dan.");
 				RegistrationStep[playerid] = 0;
 				TutTime[playerid] = 1;
 				return 0;
 			}
-			else if ((strcmp("asia", tmp, true, strlen(tmp)) == 0) && (strlen(tmp) == strlen("asia")))
+			else if ((strcmp("nam", tmp, true, strlen(tmp)) == 0) && (strlen(tmp) == strlen("nam")))
 			{
 				PlayerInfo[playerid][pOrigin] = 3;
-				SendClientMessage(playerid, COLOR_YELLOW2, "Ban da khai bao minh den tu Asia.");
-				SendClientMessage(playerid, COLOR_LIGHTRED, "Cam on ban da tra loi cau hoi cua chung toi, chung ta se bat dau phan huong dan.");
-				RegistrationStep[playerid] = 0;
-				TutTime[playerid] = 1;
-				return 0;
-			}
-			else if ((strcmp("africa", tmp, true, strlen(tmp)) == 0) && (strlen(tmp) == strlen("africa")))
-			{
-				PlayerInfo[playerid][pOrigin] = 4;
-				SendClientMessage(playerid, COLOR_YELLOW2, "Ban da khai bao minh den tu Africa.");
+				SendClientMessage(playerid, COLOR_YELLOW2, "Ban da khai bao minh den tu Mien Nam.");
 				SendClientMessage(playerid, COLOR_LIGHTRED, "Cam on ban da tra loi cau hoi cua chung toi, chung ta se bat dau phan huong dan.");
 				RegistrationStep[playerid] = 0;
 				TutTime[playerid] = 1;
@@ -18966,7 +19495,7 @@ public OnPlayerText(playerid, text[])
 			}
 			else
 			{
-				SendClientMessage(playerid, COLOR_LIGHTRED, "Ban hien dang sinh song o? (Go: USA, Europe, Asia hoac Africa)");
+				SendClientMessage(playerid, COLOR_LIGHTRED, "Ban hien dang sinh song o? (Go: bac, trung hoac nam)");
 			}
 			return 0;
 		}
@@ -19927,7 +20456,7 @@ public OnPlayerText(playerid, text[])
 		{
 			new carid = GetPlayerVehicleID(playerid);
 			new pveh = GetVehicleModel(GetPlayerVehicleID(playerid));
-			if (IsABike(carid) || IsAOBike(carid) || IsAPizzabike(carid) || IsAPlane(carid) || IsABoat(carid) || IsASweeper(carid) || IsAHarvest(carid) || IsADrugHarvest(carid) || IsATank(carid) || pveh == 523 || pveh == 480 || pveh == 567 || pveh == 533 || pveh == 555 || pveh == 539 || pveh == 572 || pveh == 571 || pveh == 530 || pveh == 457 || pveh == 575 || pveh == 536 || pveh == 424)
+			if (IsABike(carid) || IsAPizzabike(carid) || IsAPlane(carid) || IsABoat(carid) || IsASweeper(carid) || IsAHarvest(carid) || IsADrugHarvest(carid) || IsATank(carid) || pveh == 523 || pveh == 480 || pveh == 567 || pveh == 533 || pveh == 555 || pveh == 539 || pveh == 572 || pveh == 571 || pveh == 530 || pveh == 457 || pveh == 575 || pveh == 536 || pveh == 424)
 			{
 				if (PlayerInfo[playerid][pMaskuse] == 1)
 				{
@@ -20025,7 +20554,6 @@ public OnPlayerGiveDamage(playerid, damagedid, Float:amount, weaponid, bodypart)
 		}
 	}
 }
-
 CMD:baocao(playerid, params[]) { return cmd_report(playerid, params); }
 CMD:report(playerid, params[])
 {
@@ -20441,7 +20969,7 @@ CMD:respawnallcars(playerid, params[])
 		{
 			if (!unwanted[car]) SetVehicleToRespawn(car);
 		}
-		format(string, sizeof(string), "SERVER: All unused cars respawned by %s.", GN(playerid));
+		format(string, sizeof(string), "SERVER: Tat ca cac xe khong su dung duoc respawn boi %s", GN(playerid));
 		BroadCast(COLOR_WHITE, string);
 	}
 	return 1;
@@ -20622,6 +21150,7 @@ CMD:supervehslap(playerid, params[])
 	}
 	return 1;
 }
+CMD:deomatna(playerid, params[]) { return cmd_maskon(playerid, params); }
 CMD:maskon(playerid, params[])
 {
 	new string[256];
@@ -20651,6 +21180,7 @@ CMD:maskon(playerid, params[])
 	}
 	return 1;
 }
+CMD:thaomatna(playerid, params[]) { return cmd_maskoff(playerid, params); }
 CMD:maskoff(playerid, params[])
 {
 	new string[256];
@@ -22003,7 +22533,7 @@ CMD:showid(playerid, params[])
 						SendClientMessage(giveplayerid, COLOR_GREY, string);
 						format(string, sizeof(string), "* %s Da show CMND cho ban.", GN(playerid));
 						SendClientMessage(giveplayerid, COLOR_GREY, string);
-						format(string, sizeof(string), "* Ban da thay so CMND cua%s.", GN(giveplayerid));
+						format(string, sizeof(string), "* Ban da dua CMND cua minh cho %s xem.", GN(giveplayerid));
 						SendClientMessage(playerid, COLOR_GREY, string);
 					}
 					else
@@ -22591,16 +23121,16 @@ CMD:v(playerid, params[])
 					else if (GetPlayerVehicleID(playerid) == GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][1])) { ownvehkey = GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][1]); }
 					else if (GetPlayerVehicleID(playerid) == GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][2])) { ownvehkey = GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][2]); }
 					else { return 1; }
-					if (strcmp(GN(playerid), CarInfo[ownvehkey][cOwner], true) == 0)
+					if (strcmp(GLN(playerid), CarInfo[ownvehkey][cOwner], true) == 0)
 					{
 						new carsellprice = CarInfo[ownvehkey][cValue] / 4 * 3;
 						new Float:x, Float:y, Float:z;
 						new Float:a;
 						CarInfo[ownvehkey][cOwned] = 0;
-						strmid(CarInfo[ownvehkey][cOwner], "Dealership", 0, strlen("Dealership"), 999);
+						format(CarInfo[ownvehkey][cOwner], 128, "Dealership");
 						SafeGivePlayerMoney(playerid, carsellprice);
 						PlayerPlaySound(playerid, 1052, 0.0, 0.0, 0.0);
-						format(string, sizeof(string), "~w~Ban da ban xe cho: ~n~~g~$%d", carsellprice);
+						format(string, sizeof(string), "~w~Ban da ban xe cho dealership, nhan: ~n~~g~$%d", carsellprice);
 						GameTextForPlayer(playerid, string, 10000, 3);
 						GetVehiclePos(ownvehkey, x, y, z);
 						GetVehicleZAngle(ownvehkey, a);
@@ -22647,10 +23177,10 @@ CMD:v(playerid, params[])
 				else if (GetPlayerVehicleID(playerid) == GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][1])) { ownvehkey = GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][1]); }
 				else if (GetPlayerVehicleID(playerid) == GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][2])) { ownvehkey = GetVehicleIDFromKey(PlayerInfo[playerid][pPcarkey][2]); }
 				else { return 1; }
-				if (strcmp(GN(playerid), CarInfo[ownvehkey][cOwner], true) == 0)
+				if (strcmp(GLN(playerid), CarInfo[ownvehkey][cOwner], true) == 0)
 				{
 					if (sscanf(params, "s[256]ui", x_nr, giveplayerid, price))
-						return SendClientMessage(playerid, COLOR_WHITE, "Meo: /v sellto [playerid/PartOfName] [price]");
+						return SendClientMessage(playerid, COLOR_WHITE, "Su dung: /v sellto [playerid/PartOfName] [price]");
 
 					if (IsPlayerConnected(giveplayerid))
 					{
@@ -22978,7 +23508,7 @@ CMD:v(playerid, params[])
 					else { return 1; }
 					CarInfo[idcar][cOwned] = 1;
 					
-					strmid(CarInfo[idcar][cOwner], GLN(playerid), 0, strlen(GLN(playerid)), 999);
+					format(CarInfo[idcar][cOwner], 128, GLN(playerid));
 					SafeGivePlayerMoney(playerid, -CarInfo[idcar][cValue]);
 					PlayerPlayMusic(playerid);
 					GameTextForPlayer(playerid, "~w~Chuc Mung~n~Su dung /v de dau xe!", 5000, 3);
@@ -22990,6 +23520,7 @@ CMD:v(playerid, params[])
 					DateProp(playerid);
 					OnPropUpdate();
 					SavePlayer(playerid);
+					//UpdateDealership();
 					return 1;
 				}
 				else
@@ -23064,7 +23595,7 @@ CMD:trunk(playerid, params[])
 							SendClientMessage(playerid, COLOR_GREY, "  Khong the mo thung xe khi dang trong xe");
 							return 1;
 						}
-						if (IsAPlane(result) || IsABike(result) || IsAOBike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
+						if (IsAPlane(result) || IsABike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
 						{
 							SendClientMessage(playerid, COLOR_GREY, "  Phuong tien nay khong co thung chua !");
 							return 1;
@@ -23151,7 +23682,7 @@ CMD:trunk(playerid, params[])
 								SendClientMessage(playerid, COLOR_GREY, "  Khong the mo thung xe khi dang trong xe");
 								return 1;
 							}
-							if (IsAPlane(result) || IsABike(result) || IsAOBike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
+							if (IsAPlane(result) || IsABike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
 							{
 								SendClientMessage(playerid, COLOR_GREY, "  Phuong tien nay khong co thung chua !");
 								return 1;
@@ -23242,7 +23773,7 @@ CMD:trunk(playerid, params[])
 								return 1;
 							}
 						}
-						if (IsAPlane(result) || IsABike(result) || IsAOBike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
+						if (IsAPlane(result) || IsABike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
 						{
 							SendClientMessage(playerid, COLOR_GREY, "  Phuong tien nay khong co thung chua !");
 							return 1;
@@ -23324,7 +23855,7 @@ CMD:trunk(playerid, params[])
 								return 1;
 							}
 						}
-						if (IsAPlane(result) || IsABike(result) || IsAOBike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
+						if (IsAPlane(result) || IsABike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
 						{
 							SendClientMessage(playerid, COLOR_GREY, "  Phuong tien nay khong co thung chua !");
 							return 1;
@@ -23401,7 +23932,7 @@ CMD:trunk(playerid, params[])
 								return 1;
 							}
 						}
-						if (IsAPlane(result) || IsABike(result) || IsAOBike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
+						if (IsAPlane(result) || IsABike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
 						{
 							SendClientMessage(playerid, COLOR_GREY, "  Phuong tien nay khong co thung chua !");
 							return 1;
@@ -23464,7 +23995,7 @@ CMD:trunk(playerid, params[])
 								SendClientMessage(playerid, COLOR_GREY, "  Khong the mo thung xe khi dang trong xe");
 								return 1;
 							}
-							if (IsAPlane(result) || IsABike(result) || IsAOBike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
+							if (IsAPlane(result) || IsABike(result) || IsABoat(result) || IsAPizzabike(result) || IsABus(result) || IsATowcar(result) || IsAHspdCar(result) || IsAHarvest(result) || IsADrugHarvest(result) || IsASweeper(result) || result >= 78 && result <= 83 || GetVehicleModel(GetPlayerVehicleID(result)) == 523)
 							{
 								SendClientMessage(playerid, COLOR_GREY, "  Phuong tien nay khong co thung chua !");
 								return 1;
@@ -23535,7 +24066,7 @@ CMD:windows(playerid, params[])
 		if (IsPlayerInAnyVehicle(playerid))
 		{
 			new carid = GetPlayerVehicleID(playerid), pveh = GetVehicleModel(GetPlayerVehicleID(playerid));
-			if (IsABike(carid) || IsAOBike(carid) || IsAPizzabike(carid) || IsAPlane(carid) || IsABoat(carid) || IsASweeper(carid) || IsAHarvest(carid) || IsADrugHarvest(carid) || IsATank(carid) || pveh == 523 || pveh == 480 || pveh == 567 || pveh == 533 || pveh == 555 || pveh == 539 || pveh == 572 || pveh == 571 || pveh == 530 || pveh == 457 || pveh == 575 || pveh == 536 || pveh == 424)
+			if (IsABike(carid) || IsAPizzabike(carid) || IsAPlane(carid) || IsABoat(carid) || IsASweeper(carid) || IsAHarvest(carid) || IsADrugHarvest(carid) || IsATank(carid) || pveh == 523 || pveh == 480 || pveh == 567 || pveh == 533 || pveh == 555 || pveh == 539 || pveh == 572 || pveh == 571 || pveh == 530 || pveh == 457 || pveh == 575 || pveh == 536 || pveh == 424)
 			{
 				SendClientMessage(playerid, COLOR_GREY, "  Xe nay khong co cua so de mo");
 				return 1;
@@ -23640,7 +24171,6 @@ CMD:moctui(playerid, params[])
 				}
 				if (ProxDetectorS(5.0, playerid, giveplayerid))
 				{
-					
 					GetPlayerName(giveplayerid, giveplayer, sizeof(giveplayer));
 					format(string, sizeof(string), "%s co %d$ trong vi.", giveplayer, GetPlayerMoney(giveplayerid));
 					SendClientMessage(playerid, COLOR_WHITE, string);
@@ -23882,28 +24412,47 @@ CMD:addcardealership(playerid, params[])
 
 	if (PlayerInfo[playerid][pAdmin] >= 1337)
 	{
-		new gia;
-		if (sscanf(params, "i", gia)) return SCM(playerid, COLOR_GRAD2, "Su dung: /addcardealer [gia]");
+		new gia, type = 0, amount;
+		if (CountParams(params) == 0)
+		{
+			if (sscanf(params, "i", gia)) return SCM(playerid, COLOR_GRAD2, "Su dung: /addcardealer [gia] |soluong|");
+		}
+		else
+		{
+			if (sscanf(params, "ii", gia, amount)) return SCM(playerid, COLOR_GRAD2, "Su dung: /addcardealer [gia] [soluong]");
+		}
+		if ((CountParams(params) != 0)) type = 1;
 		if (gia < 0) return SCM(playerid, COLOR_GREY, "Gia ban khong the nho hon khong.");
-		
 		new Float:x, Float:y, Float:z;
 		new Float:a;
 		GetVehiclePos(vid, x, y, z);
 		GetVehicleZAngle(vid, a);
 		PlayerPlaySound(playerid, 1052, 0.0, 0.0, 0.0);
+		new model = GetVehicleModel(vid);
+		if (type == 0)
+		{
+			new str[128];
+			format(str, sizeof(str), "AdmCMD: %s da tao mot %s gia %d$ cho dealership thanh cong!", GN(playerid), GetVehicleName(vid), gia);
+			SendAdminMessage(COLOR_YELLOW, str);
+			GameTextForPlayer(playerid, "~w~Ban da tao mot phuong tien cho dealership thanh cong!", 10000, 3);
+			AddCar(model, x, y, z + 1, a, 0, 0, 60000, "Dealership", 0, gia);
+			DeleteAdminVeh(avid);
+			OnPropUpdate();
+			return 1;
+		}
+		if (amount <= 1) return SCM(playerid, COLOR_GREY, "So luong xe khong the nho hon hoac bang 1");
 		new str[128];
-		format(str, sizeof(str), "AdmCMD: %s da tao mot %s gia %d$ cho dealership thanh cong!", GN(playerid), GetVehicleName(vid), gia);
+		format(str, sizeof(str), "AdmCMD: %s da tao mot %s gia %d$, so luong %d cho dealership thanh cong!", GN(playerid), GetVehicleName(vid), gia, amount);
 		SendAdminMessage(COLOR_YELLOW, str);
 		GameTextForPlayer(playerid, "~w~Ban da tao mot phuong tien cho dealership thanh cong!", 10000, 3);
-		new model = GetVehicleModel(vid);
-		AddCar(model, x, y, z + 1, a, 0, 0, 60000, "Dealership", 0, gia);
+		AddDealership(model, x, y, z + 1, a, 0, 0, 60000, gia, amount);
 		DeleteAdminVeh(avid);
 		OnPropUpdate();
-		return 1;
 	}
 	else SendClientMessage(playerid, COLOR_GREY, "   Ban khong co quyen su dung cau lenh nay !");
 	return 1;
 }
+CMD:hutthuoc(playerid, params[]) { return cmd_smoke(playerid, params); }
 CMD:smoke(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -23959,6 +24508,7 @@ CMD:smoke(playerid, params[])
 	}
 	return 1;
 }
+CMD:vutthuoc(playerid, params[]) { return cmd_dropcigarette(playerid, params); }
 CMD:dropcigarette(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -24545,7 +25095,7 @@ CMD:authorizeswat(playerid, params[])
 	{
 		togauthorizeswat = 1;
 		
-		format(string, sizeof(string), "** HQ: Officer %s has authorized S.W.A.T. **", GN(playerid));
+		format(string, sizeof(string), "HQ: Si quan %s da cap quyen cho S.W.A.T. **", GN(playerid));
 		SendRadioMessage(1, TEAM_BLUE_COLOR, string);
 	}
 	return 1;
@@ -24557,7 +25107,7 @@ CMD:deauthorizeswat(playerid, params[])
 	{
 		togauthorizeswat = 0;
 		
-		format(string, sizeof(string), "** HQ: Officer %s has deauthorized S.W.A.T.", GN(playerid));
+		format(string, sizeof(string), "HQ: Si quan %s da ngung cap quyen cho S.W.A.T. **", GN(playerid));
 		SendRadioMessage(1, TEAM_BLUE_COLOR, string);
 	}
 	return 1;
@@ -24590,7 +25140,7 @@ CMD:swat(playerid, params[])
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
-			else { SendClientMessage(playerid, COLOR_GREY, "SWAT is not authorized by a high command!"); }
+			else { SendClientMessage(playerid, COLOR_GREY, "SWAT khong duoc uy quyen cua chi huy cap cao!"); }
 		}
 		else
 		{
@@ -24618,6 +25168,7 @@ CMD:swat(playerid, params[])
 //--------------------------------=Police Backup=----------------------------------------------------------------
 //===Needs Radar Clear
 //Made by Ehren, modified by Luk0r
+CMD:bk(playerid, params[]) { return cmd_backup(playerid, params); }
 CMD:backup(playerid, params[])
 {
 	new string[256];
@@ -24659,6 +25210,7 @@ CMD:backup(playerid, params[])
 //-----------------=Radar Clear=-----------------
 //======Goes with Police Backup
 //Made by Ehren, modified by Luk0r
+CMD:bkc(playerid, params[]) { return cmd_backupclear(playerid, params); }
 CMD:backupclear(playerid, params[])
 {
 	BackupClear(playerid, 0);
@@ -24723,6 +25275,7 @@ CMD:roadunblock(playerid, params[])
 	SendClientMessage(playerid, COLOR_GREEN, "Go bo rao can thanh cong.");
 	return 1;
 }
+CMD:xoahetchanduong(playerid, params[]) { return cmd_roadunblockall(playerid, params); }
 CMD:roadunblockall(playerid, params[])
 {
 	if (PlayerInfo[playerid][pRank] >= 5 && PlayerInfo[playerid][pMember] || PlayerInfo[playerid][pLeader] == 1)
@@ -24753,7 +25306,7 @@ CMD:roadunblockall(playerid, params[])
 	}
 	return 1;
 }
-CMD:tratien(playerid, params[]) { return cmd_pay(playerid, params); }
+CMD:duatien(playerid, params[]) { return cmd_pay(playerid, params); }
 CMD:pay(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -24833,7 +25386,7 @@ CMD:pay(playerid, params[])
 	}
 	return 1;
 }
-CMD:tuthie(playerid, params[]) { return cmd_charity(playerid, params); }
+CMD:tuthien(playerid, params[]) { return cmd_charity(playerid, params); }
 CMD:charity(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -26484,7 +27037,7 @@ CMD:local(playerid, params[])
 		else
 		{
 			new carid = GetPlayerVehicleID(playerid), pveh = GetVehicleModel(GetPlayerVehicleID(playerid));
-			if (IsABike(carid) || IsAOBike(carid) || IsAPizzabike(carid) || IsAPlane(carid) || IsABoat(carid) || IsASweeper(carid) || IsAHarvest(carid) || IsADrugHarvest(carid) || IsATank(carid) || pveh == 523 || pveh == 480 || pveh == 567 || pveh == 533 || pveh == 555 || pveh == 539 || pveh == 572 || pveh == 571 || pveh == 530 || pveh == 457 || pveh == 575 || pveh == 536 || pveh == 424)
+			if (IsABike(carid) || IsAPizzabike(carid) || IsAPlane(carid) || IsABoat(carid) || IsASweeper(carid) || IsAHarvest(carid) || IsADrugHarvest(carid) || IsATank(carid) || pveh == 523 || pveh == 480 || pveh == 567 || pveh == 533 || pveh == 555 || pveh == 539 || pveh == 572 || pveh == 571 || pveh == 530 || pveh == 457 || pveh == 575 || pveh == 536 || pveh == 424)
 			{
 				if (PlayerInfo[playerid][pMaskuse] == 1)
 				{
@@ -27179,7 +27732,7 @@ CMD:mdc(playerid, params[])
 			}
 			else
 			{
-				SendClientMessage(playerid, COLOR_GREY, "   That player is Offline !");
+				SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi dang Offline !");
 				return 1;
 			}
 		}
@@ -27601,7 +28154,7 @@ CMD:pme(playerid, params[])
 	}
 	return 1;
 }
- CMD:w(playerid, params[]) { return cmd_whisper(playerid, params); }
+CMD:w(playerid, params[]) { return cmd_whisper(playerid, params); }
 CMD:whisper(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -27623,6 +28176,7 @@ CMD:whisper(playerid, params[])
 				{
 					format(string, sizeof(string), "[Admin] %s: %s", GN(playerid), result);
 					SendClientMessage(giveplayerid, COLOR_YELLOW, string);
+					SendClientMessage(playerid, COLOR_YELLOW2, string);
 				}
 				else {
 					new Float:x, Float:y, Float:z;
@@ -27708,7 +28262,7 @@ CMD:withdraw(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
 	{
-		if (PlayerInfo[playerid][pLocal] == 103 || PlayerToPoint(1.5, playerid, 1346.5016, -1758.7649, 13.5156) || PlayerToPoint(1.5, playerid, 1592.7152, -2335.3748, 13.5400) || PlayerToPoint(1.5, playerid, 2308.4612, -1634.4176, 14.8270) || PlayerToPoint(1.5, playerid, 2865.9014, -1415.4203, 11.0061) || PlayerToPoint(1.5, playerid, 2404.5913, -1229.8973, 23.8301) || PlayerToPoint(1.5, playerid, 1172.5912, -1328.4365, 15.4034))
+		if (PlayerInfo[playerid][pLocal] == 103 || IsAtATM(playerid))
 		{
 			new cashdeposit, string[256];
 			if(sscanf(params, "i", cashdeposit))
@@ -27743,7 +28297,7 @@ CMD:bank(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
 	{
-		if (PlayerInfo[playerid][pLocal] != 103)
+		if (PlayerInfo[playerid][pLocal] != 103 && !IsAtATM(playerid))
 		{
 			SendClientMessage(playerid, COLOR_GREY, "   Ban khong co o ngan hang !");
 			return 1;
@@ -27782,7 +28336,7 @@ CMD:balance(playerid, params[])
 	if (IsPlayerConnected(playerid))
 	{
 		new string[256];
-		if (PlayerInfo[playerid][pLocal] == 103 || PlayerToPoint(1.5, playerid, 1346.5016, -1758.7649, 13.5156) || PlayerToPoint(1.5, playerid, 1592.7152, -2335.3748, 13.5400) || PlayerToPoint(1.5, playerid, 2308.4612, -1634.4176, 14.8270) || PlayerToPoint(1.5, playerid, 2865.9014, -1415.4203, 11.0061) || PlayerToPoint(1.5, playerid, 2404.5913, -1229.8973, 23.8301) || PlayerToPoint(1.5, playerid, 1172.5912, -1328.4365, 15.4034))
+		if (PlayerInfo[playerid][pLocal] == 103 || IsAtATM(playerid))
 		{
 			format(string, sizeof(string), "  Ban co $%d trong tai khoan.", PlayerInfo[playerid][pAccount]);
 			SendClientMessage(playerid, COLOR_YELLOW, string);
@@ -27824,8 +28378,8 @@ CMD:coin(playerid, params[])
 		new coin = random(2) + 1;
 		
 		new coinname[20];
-		if (coin == 1) { coinname = "head"; }
-		else { coinname = "tail"; }
+		if (coin == 1) { coinname = "Tien"; }
+		else { coinname = "Hinh"; }
 		format(string, sizeof(string), "*** %s tung dong xu va xuat hien mat %s", GN(playerid), coinname);
 		ProxDetector(10.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 	}
@@ -27889,6 +28443,7 @@ CMD:transfer(playerid, params[])
 	}
 	return 1;
 }
+CMD:trangbi(playerid, params[]) { return cmd_equip(playerid, params); }
 CMD:equip(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -27915,8 +28470,8 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
-					SafeGivePlayerWeapon(playerid, 41, 999);
+					SafeGivePlayerWeapon(playerid, 24);
+					SafeGivePlayerWeapon(playerid, 41);
 					
 					format(string, sizeof(string), "* %s has suited himself up with the standard cadet equipment.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
@@ -27928,10 +28483,10 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 29, 600);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 29);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
-					SafeGivePlayerWeapon(playerid, 25, 50);
+					SafeGivePlayerWeapon(playerid, 25);
 					
 					format(string, sizeof(string), "* %s has suited himself up with the standard officer equipment.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
@@ -27944,9 +28499,9 @@ CMD:equip(playerid, params[])
 					SafeResetPlayerWeapons(playerid);
 					SendClientMessage(playerid, COLOR_WHITE, "Use the camera to zoom and f8 to take a picture");
 					SafeGivePlayerWeapon(playerid, 43, 1);
-					SafeGivePlayerWeapon(playerid, 24, 100);
+					SafeGivePlayerWeapon(playerid, 24);
 					
-					format(string, sizeof(string), "* %s has taken the instruments needed for being a detective.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot bo trang bi tham tu.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -27956,7 +28511,7 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
 					SetPlayerSkin(playerid, 284);
 					
@@ -27970,10 +28525,10 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
 					SafeGivePlayerWeapon(playerid, 17, 5);
-					SafeGivePlayerWeapon(playerid, 29, 600);
+					SafeGivePlayerWeapon(playerid, 29);
 					SetPlayerSkin(playerid, 285);
 					
 					format(string, sizeof(string), "* %s has put on a SWAT uniform and geared up with standard equipment.", GN(playerid));
@@ -27986,10 +28541,10 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
 					SafeGivePlayerWeapon(playerid, 17, 5);
-					SafeGivePlayerWeapon(playerid, 31, 600);
+					SafeGivePlayerWeapon(playerid, 31);
 					SetPlayerSkin(playerid, 285);
 					
 					format(string, sizeof(string), "* %s has put on a SWAT uniform and geared up with medium equipment.", GN(playerid));
@@ -28002,10 +28557,10 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
 					SafeGivePlayerWeapon(playerid, 16, 5);
-					SafeGivePlayerWeapon(playerid, 27, 100);
+					SafeGivePlayerWeapon(playerid, 27);
 					SetPlayerSkin(playerid, 285);
 					
 					format(string, sizeof(string), "* %s has put on a SWAT uniform and geared up with heavy equipment.", GN(playerid));
@@ -28018,8 +28573,8 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 23, 400);
-					SafeGivePlayerWeapon(playerid, 34, 50);
+					SafeGivePlayerWeapon(playerid, 23);
+					SafeGivePlayerWeapon(playerid, 34);
 					SetPlayerSkin(playerid, 285);
 					
 					format(string, sizeof(string), "* %s has put on a SWAT uniform and geared up with sharpshooter equipment.", GN(playerid));
@@ -28033,7 +28588,7 @@ CMD:equip(playerid, params[])
 					SetPlayerArmour(playerid, 100);
 					SetPlayerHealth(playerid, 100);
 					
-					format(string, sizeof(string), "* %s places on a Kevlar vest and eats some donuts.", GN(playerid));
+					format(string, sizeof(string), "* %s da mac giap va duoc hoi phuc suc khoe.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28043,8 +28598,8 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 23, 400);
-					SafeGivePlayerWeapon(playerid, 33, 50);
+					SafeGivePlayerWeapon(playerid, 23);
+					SafeGivePlayerWeapon(playerid, 33);
 					SetPlayerSkin(playerid, 288);
 					
 					format(string, sizeof(string), "* %s has put on a ceremonial uniform and equipment.", GN(playerid));
@@ -28054,7 +28609,7 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 23, 400);
+					SafeGivePlayerWeapon(playerid, 23);
 					SafeGivePlayerWeapon(playerid, 33, 50);
 					SetPlayerSkin(playerid, 283);
 					
@@ -28096,7 +28651,7 @@ CMD:equip(playerid, params[])
 					SafeGivePlayerWeapon(playerid, 43, 100);
 					SafeGivePlayerWeapon(playerid, 3, 1);
 					
-					format(string, sizeof(string), "* %s has suited himself up with the standard intern equipment.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot bo trang bi tap su.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28106,10 +28661,10 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 43, 100);
-					SafeGivePlayerWeapon(playerid, 24, 100);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 3, 1);
 					
-					format(string, sizeof(string), "* %s has suited himself up with the standard agent equipment.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot bo trang bi mat vu.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28120,7 +28675,7 @@ CMD:equip(playerid, params[])
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 43, 100);
 					
-					format(string, sizeof(string), "* %s has taken the instruments needed for being a detective.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot bo trang bi tham tu.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28131,10 +28686,10 @@ CMD:equip(playerid, params[])
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 43, 100);
 					SafeGivePlayerWeapon(playerid, 4, 1);
-					SafeGivePlayerWeapon(playerid, 23, 100);
+					SafeGivePlayerWeapon(playerid, 23);
 					SafeGivePlayerWeapon(playerid, 46, 1);
 					
-					format(string, sizeof(string), "* %s has taken the equipment needed for covert operations.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot trang bi diep vien.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28144,13 +28699,13 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
 					SafeGivePlayerWeapon(playerid, 17, 5);
-					SafeGivePlayerWeapon(playerid, 29, 600);
+					SafeGivePlayerWeapon(playerid, 29);
 					SetPlayerSkin(playerid, 285);
 					
-					format(string, sizeof(string), "* %s has put on a tactical uniform and geared up with standard equipment.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot bo trang bi hang nhe danh cho SWAT.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28160,13 +28715,13 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
 					SafeGivePlayerWeapon(playerid, 17, 5);
-					SafeGivePlayerWeapon(playerid, 31, 600);
+					SafeGivePlayerWeapon(playerid, 31);
 					SetPlayerSkin(playerid, 285);
 					
-					format(string, sizeof(string), "* %s has put on a tactical uniform and geared up with medium equipment.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot bo trang bi hang trung binh danh cho SWAT.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28176,13 +28731,13 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 24, 400);
+					SafeGivePlayerWeapon(playerid, 24);
 					SafeGivePlayerWeapon(playerid, 41, 999);
 					SafeGivePlayerWeapon(playerid, 16, 5);
-					SafeGivePlayerWeapon(playerid, 27, 100);
+					SafeGivePlayerWeapon(playerid, 27);
 					SetPlayerSkin(playerid, 285);
 					
-					format(string, sizeof(string), "* %s has put on a tactical uniform and geared up with heavy equipment.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot bo trang bi hang nang danh cho SWAT.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28192,12 +28747,12 @@ CMD:equip(playerid, params[])
 				{
 					SafeResetPlayerWeapons(playerid);
 					SafeGivePlayerWeapon(playerid, 3, 1);
-					SafeGivePlayerWeapon(playerid, 23, 400);
-					SafeGivePlayerWeapon(playerid, 34, 50);
+					SafeGivePlayerWeapon(playerid, 23);
+					SafeGivePlayerWeapon(playerid, 34);
 					SafeGivePlayerWeapon(playerid, 46, 1);
 					SetPlayerSkin(playerid, 285);
 					
-					format(string, sizeof(string), "* %s has put on a tactical uniform and geared up with sharpshooter equipment.", GN(playerid));
+					format(string, sizeof(string), "*  %s da lay mot bo trang ban tia danh cho SWAT.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28208,7 +28763,7 @@ CMD:equip(playerid, params[])
 					SetPlayerArmour(playerid, 100);
 					SetPlayerHealth(playerid, 100);
 					
-					format(string, sizeof(string), "* %s places on a Kevlar vest and eats some donuts.", GN(playerid));
+					format(string, sizeof(string), "* %s da mac giap va duoc hoi phuc suc khoe.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28218,7 +28773,7 @@ CMD:equip(playerid, params[])
 				{
 					SafeGivePlayerWeapon(playerid, 44, 1);
 					
-					format(string, sizeof(string), "* %s has equipped a pair of nightvision goggles.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot nightvision goggles.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28227,7 +28782,7 @@ CMD:equip(playerid, params[])
 				if (PlayerInfo[playerid][pMember] == 2 || PlayerInfo[playerid][pLeader] == 2 || PlayerInfo[playerid][pMember] == 1 || PlayerInfo[playerid][pLeader] == 1)
 				{
 					SafeGivePlayerWeapon(playerid, 45, 1);
-					format(string, sizeof(string), "* %s has equipped a pair of thermal goggles.", GN(playerid));
+					format(string, sizeof(string), "* %s da lay mot thermal goggles.", GN(playerid));
 					ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 				}
 			}
@@ -28815,6 +29370,7 @@ CMD:buy(playerid, params[])
 	}
 	return 1;
 }
+CMD:trogiupxe(playerid, params[]) { return cmd_vehiclehelp(playerid, params); }
 CMD:vehiclehelp(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -28846,7 +29402,7 @@ CMD:apark(playerid, params[])
 		if (!IsAnOwnableCar(carid)) return SCM(playerid, COLOR_GREY, "Xe nay khong phai xe so huu.");
 		GetPlayerName(playerid, playername, sizeof(playername));
 		GetVehiclePos(carid, x, y, z);
-		//			GetPlayerFacingAngle(playerid, a);
+		//GetPlayerFacingAngle(playerid, a);
 		GetVehicleZAngle(carid, a);
 		if (PlayerInfo[playerid][pAdmin] >= 3)
 		{
@@ -28986,6 +29542,7 @@ CMD:buyhouse(playerid, params[])
 	}
 	return 1;
 }
+CMD:thuenha(playerid, params[]) { return cmd_rentroom(playerid, params); }
 CMD:rentroom(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -33044,7 +33601,7 @@ CMD:makeleader(playerid, params[])
 			SendClientMessage(playerid, COLOR_GRAD2, "Su dung: /makeleader [playerid/Ten] [Number(1-10)]");
 			return 1;
 		}
-		if (level > 16 || level < 0) { SendClientMessage(playerid, COLOR_GREY, "   Khong the duoi 0, hoac tren 16!"); return 1; }
+		if (level > 10 || level < 0) { SendClientMessage(playerid, COLOR_GREY, "   Khong the duoi 0, hoac tren 16!"); return 1; }
 		if (PlayerInfo[playerid][pAdmin] >= 4)
 		{
 			if (IsPlayerConnected(para1))
@@ -33059,7 +33616,7 @@ CMD:makeleader(playerid, params[])
 					PlayerInfo[para1][pLeader] = level;
 					format(string, sizeof(string), "   Ban da duoc thang chuc thanh Leader cho Faction, boi Admin %s", GN(playerid));
 					SendClientMessage(para1, COLOR_WHITE, string);
-					format(string, sizeof(string), "   Ban da nang %s len thanh leader faction so %d.", GN(para1), level);
+					format(string, sizeof(string), "   Ban da dua %s len  leader faction so %d.", GN(para1), level);
 					SendClientMessage(playerid, COLOR_WHITE, string);
 					if (level == 0) { PlayerInfo[para1][pChar] = 0; PlayerInfo[para1][pRank] = 0; gTeam[para1] = 3; PlayerInfo[para1][pTeam] = 0; return 1; }
 					else if (level == 1) { PlayerInfo[para1][pChar] = 288; } //Police Force
@@ -33097,17 +33654,17 @@ CMD:makeleader(playerid, params[])
 						gTeam[para1] = 15;
 						PlayerInfo[para1][pTeam] = 15;
 					}
-
-					SetPlayerSkin(para1, PlayerInfo[para1][pChar]);
-
+					
 					if (level == 0)
-					{
 						PlayerInfo[para1][pRank] = 0;
-					}
 					else
-					{
 						PlayerInfo[para1][pRank] = 6;
+
+					if (PlayerInfo[para1][pChar] == 0)
+					{
+						SetPlayerSkin(para1, PlayerInfo[para1][pModel]);
 					}
+					else SetPlayerSkin(para1, PlayerInfo[para1][pChar]);
 				}
 			}//not connected
 		}
@@ -34039,6 +34596,7 @@ CMD:fuelcars(playerid, params[])
 	}
 	return 1;
 }
+CMD:sung(playerid, params[]) { return cmd_givegun(playerid, params); }
 CMD:givegun(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -34055,9 +34613,9 @@ CMD:givegun(playerid, params[])
 		{
 			SendClientMessage(playerid, COLOR_GRAD1, "   wrong WeaponID!"); return 1;
 		}
-		if (ammo <1 || ammo > 9999)
+		if (ammo <1 || ammo > 10000)
 		{
-			SendClientMessage(playerid, COLOR_GRAD1, "   Khong the duoi 1 hoac tren 9999 dan duoc!"); return 1;
+			SendClientMessage(playerid, COLOR_GRAD1, "   Khong the duoi 1 hoac tren 10000 dan duoc!"); return 1;
 		}
 		if (PlayerInfo[playerid][pAdmin] >= 1337)
 		{
@@ -34216,6 +34774,7 @@ CMD:setage(playerid, params[])
 	}
 	return 1;
 	}*/
+CMD:suaveh(playerid, params[]) { return cmd_fixveh(playerid, params); }
 CMD:fixveh(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -34582,7 +35141,7 @@ CMD:changename(playerid, params[])
 	}
 	return 1;
 }
-CMD:KickEx(playerid, params[])
+CMD:kick(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
 	{
@@ -34675,84 +35234,254 @@ CMD:kickres(playerid, params[])
 	}
 	return 1;
 }
-CMD:unbanip(playerid, params[])
-{
-	if (PlayerInfo[playerid][pAdmin] >= 3)
-	{
-		new giveplayerid, string[255];
-		if (sscanf(params, "u", giveplayerid))
-		{
-			SendClientMessage(playerid, COLOR_GRAD1, "Su dung: /unbanip [players ip]");
-			return 1;
-		}
-		format(string, sizeof(string), "unbanip %s", GN(giveplayerid));
-		SendRconCommand(string);
-		SendRconCommand("reloadbans");
 
-		format(string, 256, "AdmWarning: %s da unban IP %s", GN(playerid), GN(giveplayerid));
-		ABroadCast(COLOR_YELLOW, string, 1);
-	}
-	return 1;
-}
-CMD:unban(playerid, params[])
-{
-	if ((IsPlayerAdmin(playerid)) || PlayerInfo[playerid][pAdmin] >= 3)
-	{
-		new tmp[255], string[255];
-		if (sscanf(params, "s[255]", tmp))
-		{
-			SendClientMessage(playerid, COLOR_WHITE, "Su dung: /unban [PlayerName_PlayerLastName]");
-			return 1;
-		}
-		format(string, 256, "AdmWarning: %s da unbann %s", GN(playerid), tmp);
-		ABroadCast(COLOR_YELLOW, string, 1);
-		format(string, 256, "AdmWarning: %s da unbanned %s", GN(playerid), tmp);
-		printf(string);
-		format(string, sizeof(string), "%s.ini", tmp);
-		fremove(string);
-		SendClientMessage(playerid, COLOR_WHITE, "UNBANNED");
-		SendRconCommand(string);
-		SendRconCommand("reloadbans");
-
-	}
-	return 1;
-}
 CMD:ban(playerid, params[])
 {
-	if (IsPlayerConnected(playerid))
+	if (PlayerInfo[playerid][pAdmin] < 3) return SCM(playerid, COLOR_GREY, "Admin level 3 tro len moi co the thuc hien.");
+	new banobject[50], reason[50];
+	if (sscanf(params, "s[50]s[50]", banobject, reason)) return SCM(playerid, COLOR_GREY, "Su dung: /ban [playername/ip] [ly do]");
+	if (IsContainChar(banobject, '.') == 1)
 	{
-		new giveplayerid, result[255], string[255];
-		if (sscanf(params, "us[255]", giveplayerid, result))
+		if (PlayerInfo[playerid][pAdmin] < 1337) return SCM(playerid, COLOR_GREY, "Admin level 1337 moi co the ban IP.");
+		if (!IsValidIP(banobject)) return SCM(playerid, COLOR_GREY, "IP khong hop le.");
+		new str[128];
+		if (CheckBanIP(banobject) == 0)
 		{
-			SendClientMessage(playerid, COLOR_GRAD2, "Su dung: /ban [playerid/PartOfName] [Ly do]");
-			return 1;
+			BanIP(banobject);
+			format(str, sizeof(str), "AdmCMD: %s da ban IP %s. Ly do: %s", GN(playerid), banobject, reason);
+			SendAdminMessage(COLOR_LIGHTRED, str);
 		}
-		if (PlayerInfo[playerid][pAdmin] >= 1)
+		else SCM(playerid, COLOR_GREY, "IP nay da bi banned!");
+	}
+	else
+	{
+		if (CheckBan(playerid) == 0)
+			BanPlayer(playerid, banobject, reason);
+		else SCM(playerid, COLOR_GREY, "Nguoi choi nay khong ton tai hoac da bi banned!");
+	}
+	return 1;
+}
+ CMD:unban(playerid, params[])
+ {
+	if (PlayerInfo[playerid][pAdmin] < 3) return SCM(playerid, COLOR_GREY, "Admin level 3 tro len moi co the thuc hien.");
+	new banobject[50];
+	if (sscanf(params, "s[50]", banobject)) return SCM(playerid, COLOR_GREY, "Su dung: /unban [playername/ip]");
+	if (IsContainChar(banobject, '.') == 1)
+	{
+		if (PlayerInfo[playerid][pAdmin] < 1337) return SCM(playerid, COLOR_GREY, "Admin level 1337 moi co the ban IP.");
+		if (!IsValidIP(banobject)) return SCM(playerid, COLOR_GREY, "IP khong hop le.");
+		new str[128];
+		
+		if (UnBanIP(banobject))
 		{
-			if (IsPlayerConnected(giveplayerid))
+			format(str, sizeof(str), "AdmCMD: %s da unban IP %s.", GN(playerid), banobject);
+			SendAdminMessage(COLOR_LIGHTRED, str);
+		}
+		else SCM(playerid, COLOR_GREY, "IP nay khong bi banned!");
+	}
+	else UnBanPlayer(playerid, banobject);
+	return 1;
+ }
+stock fdeleteline(filename[], line)
+{
+	new count, string[256], File:file, File:temp;
+
+	file = fopen(filename, io_read);
+	temp = fopen("tmpfile.tmp", io_write);
+
+	while (fread(file, string))
+	if (++count != line)
+		fwrite(temp, string);
+
+	fclose(file);
+	fclose(temp);
+
+	file = fopen(filename, io_write);
+	temp = fopen("tmpfile.tmp", io_read);
+
+	while (fread(temp, string))
+		fwrite(file, string);
+
+	fclose(file);
+	fclose(temp);
+	fremove("tmpfile.tmp");
+}
+stock GetPlayerIdFromName(playername[])
+{
+	for (new i = 0; i <= MAX_PLAYERS; i++)
+	{
+		if (IsPlayerConnected(i))
+		{
+			if (strcmp(GLN(i), playername, true) == 0)
 			{
-				if (giveplayerid != INVALID_PLAYER_ID)
-				{
-					new year, month, day;
-					getdate(year, month, day);
-					format(string, sizeof(string), "AdmCMD: %s da bi BAN boi %s, ly do: %s (%d-%d-%d)", GN(giveplayerid), GN(playerid), (result), month, day, year);
-					BanLog(string);
-					format(string, sizeof(string), "AdmCMD: %s da bi BAN boi %s, ly do: %s", GN(giveplayerid), GN(playerid), (result));
-					BroadCast(COLOR_LIGHTRED, string);
-					PlayerInfo[giveplayerid][pLocked] = 1;
-					Ban(giveplayerid);
-					return 1;
-				}
-			}//not connected
+				return i;
+			}
+		}
+	}
+	return INVALID_PLAYER_ID;
+}
+stock BanPlayer(playerid, name[], reason[])
+{
+	SCM(playerid, COLOR_WHITE, "[Ban] Kiem tra tai khoan...");
+	new sql[400];
+	format(sql, sizeof(sql), "UPDATE user SET Banned = 1 WHERE Name = '%s'", name);
+	mysql_tquery(conn, sql, "BanCheck", "issi", playerid, name, reason, 0);
+}
+stock UnBanPlayer(playerid, name[])
+{
+	SCM(playerid, COLOR_WHITE, "[UnBan] Kiem tra tai khoan...");
+	new sql[400];
+	format(sql, sizeof(sql), "UPDATE user SET Banned = 0 WHERE Name = '%s'", name);
+	mysql_tquery(conn, sql, "BanCheck", "issi", playerid, name, "", 1);
+}
+forward BanCheck(playerid, name[], reason[], type);
+public BanCheck(playerid, name[], reason[], type)
+{
+	new countresult = cache_affected_rows();
+	if (countresult != -1)
+	{
+		if (type == 0)
+		{
+			new str[128];
+			format(str, sizeof(str), "AdmCMD: %s da ban tai khoan %s. Ly do: %s", GN(playerid), name, reason);
+			BroadCast(COLOR_LIGHTRED, str);
+
+			new pid = GetPlayerIdFromName(name);
+			if (pid != INVALID_PLAYER_ID)
+				KickEx(pid);
 		}
 		else
 		{
-			format(string, sizeof(string), "   %d , la nguoi choi khong hop le.", giveplayerid);
-			SendClientMessage(playerid, COLOR_GRAD1, string);
+			new str[128];
+			format(str, sizeof(str), "AdmCMD: %s da unban tai khoan %s", GN(playerid), name);
+			BroadCast(COLOR_LIGHTRED, str);
+		}
+	}
+	else
+	{
+		if (type == 1) SCM(playerid, COLOR_RED, "[Ban] Ban that bai! Khong tim thay tai khoan.");
+		else SCM(playerid, COLOR_RED, "[UnBan] Ban that bai! Khong tim thay tai khoan.");
+	}
+}
+stock BanIP(IP[])
+{
+	new string[24];
+	new File:ban = fopen("ban.cfg", io_append);
+	format(string, sizeof(string), "%s\r\n", IP);
+	fwrite(ban, string);
+	fclose(ban);
+	for (new i = 0; i<MAX_PLAYERS; i++)
+	{
+		if (strcmp(IP, GetIp(i), true) == 0)
+		{
+			new str[128];
+			format(str, sizeof(str), "IP cua ban da bi khoa, ban se bi kick khoi server.");
+			SCM(i, COLOR_RED, str);
+			KickEx(i);
 		}
 	}
 	return 1;
 }
+stock UnBanIP(IP[])
+{
+	new str[128];
+	new File:ban = fopen("ban.cfg", io_read);
+	new idx = 1, done = 0;
+	while (fread(ban, str))
+	{
+		if (!strcmp(IP, str, true))
+		{
+			fdeleteline("ban.cfg", idx);
+			done = 1;
+		}
+		idx++;
+	}
+	fclose(ban);
+	return done;
+}
+stock CheckBan(playerid)
+{
+	if (CheckBanPlayer(GLN(playerid)) == 1)
+	{
+		SCM(playerid, COLOR_RED, "Tai khoan da bi banned.");
+		KickEx(playerid);
+	}
+	if (CheckBanIP(GetIp(playerid)))
+	{
+		SCM(playerid, COLOR_RED, "IP cua ban da bi banned.");
+		KickEx(playerid);
+	}
+	return 1;
+}
+stock CheckBanPlayer(name[])
+{
+	new sql[400];
+	format(sql, sizeof(sql), "SELECT Banned FROM user WHERE Name = '%s'", name);
+	mysql_query(conn, sql);
+	new row;
+	cache_get_row_count(row);
+	if (row != 0)
+	{
+		new isbanned = 0;
+		cache_get_value_name_int(0, "Banned", isbanned);
+		return isbanned;
+	}
+	return 0;
+}
+stock CheckBanIP(ip[])
+{
+	new string[128];
+	new File: file = fopen("ban.cfg", io_read);
+	while (fread(file, string))
+	{
+		new readip[128];
+		format(readip, sizeof(readip), string);
+		Replace(readip, "\r\n", "");
+		if (!strcmp(ip, readip, true))
+		{
+			fclose(file);
+			return 1;
+		}
+	}
+	fclose(file);
+	return 0;
+}
+//CMD:ban(playerid, params[])
+//{
+//	if (IsPlayerConnected(playerid))
+//	{
+//		new giveplayerid, result[255], string[255];
+//		if (sscanf(params, "us[255]", giveplayerid, result))
+//		{
+//			SendClientMessage(playerid, COLOR_GRAD2, "Su dung: /ban [playerid/PartOfName] [Ly do]");
+//			return 1;
+//		}
+//		if (PlayerInfo[playerid][pAdmin] >= 1)
+//		{
+//			if (IsPlayerConnected(giveplayerid))
+//			{
+//				if (giveplayerid != INVALID_PLAYER_ID)
+//				{
+//					new year, month, day;
+//					getdate(year, month, day);
+//					format(string, sizeof(string), "AdmCMD: %s da bi BAN boi %s, ly do: %s (%d-%d-%d)", GN(giveplayerid), GN(playerid), (result), month, day, year);
+//					BanLog(string);
+//					format(string, sizeof(string), "AdmCMD: %s da bi BAN boi %s, ly do: %s", GN(giveplayerid), GN(playerid), (result));
+//					BroadCast(COLOR_LIGHTRED, string);
+//					PlayerInfo[giveplayerid][pLocked] = 1;
+//					Ban(giveplayerid);
+//					return 1;
+//				}
+//			}//not connected
+//		}
+//		else
+//		{
+//			format(string, sizeof(string), "   %d , la nguoi choi khong hop le.", giveplayerid);
+//			SendClientMessage(playerid, COLOR_GRAD1, string);
+//		}
+//	}
+//	return 1;
+//}
 CMD:freeze(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -35074,6 +35803,7 @@ CMD:luatchoi(playerid, params[])
 	}
 	return 1;
 }
+CMD:trogiupdienthoai(playerid, params[]) { return cmd_cellphonehelp(playerid, params); }
 CMD:cellphonehelp(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -35092,6 +35822,7 @@ CMD:cellphonehelp(playerid, params[])
 	}
 	return 1;
 }
+CMD:trogiupnha(playerid, params[]) { return cmd_househelp(playerid, params); }
 CMD:househelp(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -35104,6 +35835,7 @@ CMD:househelp(playerid, params[])
 	}
 	return 1;
 }
+CMD:trogiupnote(playerid, params[]) { return cmd_notehelp(playerid, params); }
 CMD:notehelp(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -35115,6 +35847,7 @@ CMD:notehelp(playerid, params[])
 	}
 	return 1;
 }
+CMD:trogiupthue(playerid, params[]) { return cmd_renthelp(playerid, params); }
 CMD:renthelp(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -35138,6 +35871,7 @@ CMD:businesshelp(playerid, params[])
 	}
 	return 1;
 }
+CMD:trogiupleader(playerid, params[]) { return cmd_leaderhelp(playerid, params); }
 CMD:leaderhelp(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -36325,7 +37059,7 @@ CMD:stoplesson(playerid, params[])
 	}
 	else
 	{
-	SendClientMessage(playerid, COLOR_GREY, "   That player is Offline !");
+	SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi dang Offline !");
 	return 1;
 	}
 	}
@@ -36361,7 +37095,7 @@ CMD:stoplesson(playerid, params[])
 	}
 	else
 	{
-	SendClientMessage(playerid, COLOR_GREY, "   That player is Offline !");
+	SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi dang Offline !");
 	return 1;
 	}
 	}
@@ -36401,7 +37135,7 @@ CMD:stoplesson(playerid, params[])
 	}
 	else
 	{
-	SendClientMessage(playerid, COLOR_GREY, "   That player is Offline !");
+	SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi dang Offline !");
 	return 1;
 	}
 	}
@@ -36544,7 +37278,7 @@ CMD:stoplesson(playerid, params[])
 	}
 	else
 	{
-	SendClientMessage(playerid, COLOR_GREY, "   That player is Offline !");
+	SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi dang Offline !");
 	return 1;
 	}
 	}
@@ -37768,6 +38502,7 @@ CMD:lotto(playerid, params[])
 	}
 	return 1;
 }
+CMD:tichthu(playerid, params[]) { return cmd_take(playerid, params); }
 CMD:take(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -39383,6 +40118,7 @@ CMD:sell(playerid, params[])
 	}
 	return 1;
 }
+CMD:gia(playerid, params[]) { return cmd_fare(playerid, params); }
 CMD:fare(playerid, params[])
 {
 		 new string[256];
@@ -41146,15 +41882,15 @@ CMD:sellgun(playerid, params[])
 			if (giveplayerid == INVALID_PLAYER_ID) return 1;
 			if (strcmp(x_weapon, "knife", true) == 0) { if (PlayerInfo[playerid][pMats] > 99) { weapon[playerid] = 4; price[playerid] = 100; ammo[playerid] = 1; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
 			else if (strcmp(x_weapon, "bat", true) == 0) { if (PlayerInfo[playerid][pMats] > 99) { weapon[playerid] = 5; price[playerid] = 100; ammo[playerid] = 1; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
-			else if (strcmp(x_weapon, "sdpistol", true) == 0) { if (PlayerInfo[playerid][pMats] > 99) { weapon[playerid] = 23; price[playerid] = 100; ammo[playerid] = 50; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
+			else if (strcmp(x_weapon, "sdpistol", true) == 0) { if (PlayerInfo[playerid][pMats] > 99) { weapon[playerid] = 23; price[playerid] = 100; ammo[playerid] = 0x7FFFFFFF; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
 			else if (strcmp(x_weapon, "flowers", true) == 0) { if (PlayerInfo[playerid][pMats] > 24) { weapon[playerid] = 14; price[playerid] = 25; ammo[playerid] = 1; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
-			else if (strcmp(x_weapon, "eagle", true) == 0) { if (PlayerInfo[playerid][pMats] > 199) { weapon[playerid] = 24; price[playerid] = 150; ammo[playerid] = 50; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
-			else if (strcmp(x_weapon, "mp5", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co ban sung o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 199) { weapon[playerid] = 29; price[playerid] = 200; ammo[playerid] = 200; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
-			else if (strcmp(x_weapon, "shotgun", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co ban sung o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 199) { weapon[playerid] = 25; price[playerid] = 200; ammo[playerid] = 50; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
+			else if (strcmp(x_weapon, "eagle", true) == 0) { if (PlayerInfo[playerid][pMats] > 199) { weapon[playerid] = 24; price[playerid] = 150; ammo[playerid] = 0x7FFFFFFF; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
+			else if (strcmp(x_weapon, "mp5", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co the ban sung nay o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 199) { weapon[playerid] = 29; price[playerid] = 200; ammo[playerid] = 0x7FFFFFFF; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
+			else if (strcmp(x_weapon, "shotgun", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co the ban sung nay o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 199) { weapon[playerid] = 25; price[playerid] = 200; ammo[playerid] = 0x7FFFFFFF; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
 			//else if(strcmp(x_weapon,"spas12",true) == 0) { if(PlayerInfo[playerid][pMats] > 599) { weapon[playerid] = 27; price[playerid] = 600; ammo[playerid] = 50; } else { SendClientMessage(playerid,COLOR_GREY,"   Not enough Materials for that Weapon!"); return 1; } }
-			else if (strcmp(x_weapon, "ak47", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co ban sung o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 599) { weapon[playerid] = 30; price[playerid] = 600; ammo[playerid] = 250; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
-			else if (strcmp(x_weapon, "m4", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co ban sung o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 599) { weapon[playerid] = 31; price[playerid] = 600; ammo[playerid] = 250; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
-			else if (strcmp(x_weapon, "rifle", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co ban sung o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 599) { weapon[playerid] = 33; price[playerid] = 600; ammo[playerid] = 50; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
+			else if (strcmp(x_weapon, "ak47", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co the ban sung nay o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 599) { weapon[playerid] = 30; price[playerid] = 600; ammo[playerid] = 0x7FFFFFFF; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
+			else if (strcmp(x_weapon, "m4", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co the ban sung nay o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 599) { weapon[playerid] = 31; price[playerid] = 600; ammo[playerid] = 0x7FFFFFFF; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
+			else if (strcmp(x_weapon, "rifle", true) == 0) { if (!PlayerToPoint(15.0, playerid, 1484.3933, -1731.2124, 6.7213)) { SendClientMessage(playerid, COLOR_GREY, "   Ban chi co the ban sung nay o khu vuc Cho Den (Black Market) !"); return 1; } if (PlayerInfo[playerid][pMats] > 599) { weapon[playerid] = 33; price[playerid] = 600; ammo[playerid] = 0x7FFFFFFF; } else { SendClientMessage(playerid, COLOR_GREY, "   Khong du vat lieu cho vu khi nay!"); return 1; } }
 			else { SendClientMessage(playerid, COLOR_GREY, "   Ten sung khong hop le!"); return 1; }
 			if (ProxDetectorS(5.0, playerid, giveplayerid))
 			{
@@ -41181,9 +41917,9 @@ CMD:sellgun(playerid, params[])
 				SetPVarInt(giveplayerid, "OfferP", gia);
 				SetPVarInt(giveplayerid, "OfferType", OFFERWEAPON);
 
-				format(string, sizeof(string), "%s de nghi ban cho ban vu khi %s voi %d dan, gia tien %d$. (/accept vukhi)", GN(playerid), x_weapon, ammo[playerid], gia);
+				format(string, sizeof(string), "%s de nghi ban cho ban vu khi %s, gia tien %d$. (/accept vukhi)", GN(playerid), x_weapon, gia);
 				SCM(giveplayerid, COLOR_GRAD1, string);
-				format(string, sizeof(string), "Ban de nghi ban cho %s vu khi %s voi %d dan, gia tien %d$", GN(giveplayerid), x_weapon, ammo[playerid], gia);
+				format(string, sizeof(string), "Ban de nghi ban cho %s vu khi %s, gia tien %d$", GN(giveplayerid), x_weapon, gia);
 				SCM(giveplayerid, COLOR_GRAD1, string);
 				/*format(string, sizeof(string), "   Ban da dua cho %s, mot %s voi %d dan, cho %d Materials.", giveplayer, x_weapon, ammo[playerid], price[playerid]);
 				PlayerPlaySound(playerid, 1052, 0.0, 0.0, 0.0);
@@ -41463,13 +42199,13 @@ CMD:fill(playerid, params[])
 			if (Gas[idcar] <= 99)
 			{
 				TogglePlayerControllable(playerid, 0);
-				GameTextForPlayer(playerid, "~w~~n~~n~~n~~n~~n~~n~~n~~n~~n~Re-Fueling Vehicle, please wait", 2000, 3);
+				GameTextForPlayer(playerid, "~w~~n~~n~~n~~n~~n~~n~~n~~n~~n~Dang do xang, vui long doi giay lat", 2000, 3);
 				SetTimer("Fillup", RefuelWait, 0);
 				Refueling[playerid] = 1;
 			}
 			else
 			{
-				GameTextForPlayer(playerid, "~r~~n~~n~~n~~n~~n~~n~~n~~n~~n~Gas can is full", 2000, 3);
+				GameTextForPlayer(playerid, "~r~~n~~n~~n~~n~~n~~n~~n~~n~~n~Can xang da duoc do day", 2000, 3);
 			}
 		}
 		else
@@ -41479,6 +42215,7 @@ CMD:fill(playerid, params[])
 	}
 	return 1;
 }
+CMD:doxangxe(playerid, params[]) { return cmd_fillcar(playerid, params); }
 CMD:fillcar(playerid, params[])
 {
 	if (IsPlayerConnected(playerid))
@@ -41782,7 +42519,7 @@ CMD:undercover(playerid, params[])
 						format(string, sizeof(string), "* %s cat Undercover uniform tro lai tu khoa.", GN(playerid));
 						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 						SafeGivePlayerWeapon(playerid, 3, 1);
-						SafeGivePlayerWeapon(playerid, 24, 50);
+						SafeGivePlayerWeapon(playerid, 24);
 						SetPlayerSkin(playerid, 280);
 					}
 					else if (PlayerInfo[playerid][pRank] > 3)
@@ -41791,7 +42528,7 @@ CMD:undercover(playerid, params[])
 						format(string, sizeof(string), "* %s cat Undercover uniform tro lai tu khoa.", GN(playerid));
 						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 						SafeGivePlayerWeapon(playerid, 3, 1);
-						SafeGivePlayerWeapon(playerid, 24, 50);
+						SafeGivePlayerWeapon(playerid, 24);
 						SetPlayerSkin(playerid, 281);
 					}
 					else if (PlayerInfo[playerid][pRank] == 6)
@@ -41800,7 +42537,7 @@ CMD:undercover(playerid, params[])
 						format(string, sizeof(string), "* %s cat Undercover uniform tro lai tu khoa.", GN(playerid));
 						ProxDetector(30.0, playerid, string, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE, COLOR_PURPLE);
 						SafeGivePlayerWeapon(playerid, 3, 1);
-						SafeGivePlayerWeapon(playerid, 24, 50);
+						SafeGivePlayerWeapon(playerid, 24);
 						SetPlayerSkin(playerid, 283);
 					}
 				}
@@ -42358,10 +43095,10 @@ CMD:accept(playerid, params[])
 				return 1;
 			}
 			GetWeaponName(gun, gunname, sizeof(gunname));
-			format(string, sizeof(string), "   Ban da dua cho %s, mot %s voi %d dan, mat %d vat lieu, nhan %d$.", GN(playerid), gunname, ammo, mats, price);
+			format(string, sizeof(string), "   Ban da dua cho %s, mot %s, mat %d vat lieu, nhan duoc %d$.", GN(playerid), gunname, mats, price);
 			PlayerPlaySound(offerplayer, 1052, 0.0, 0.0, 0.0);
 			SendClientMessage(offerplayer, COLOR_GRAD1, string);
-			format(string, sizeof(string), "   Ban dua cho %s %d$, nhan duoc mot %s voi %d dan.", GN(offerplayer), price, gunname, ammo);
+			format(string, sizeof(string), "   Ban dua cho %s %d$, nhan duoc %s.", GN(offerplayer), price, gunname);
 			SendClientMessage(playerid, COLOR_GRAD1, string);
 			PlayerPlaySound(playerid, 1052, 0.0, 0.0, 0.0);
 
@@ -45579,7 +46316,7 @@ CMD:ticket(playerid, params[])
 		}
 		else
 		{
-			SendClientMessage(playerid, COLOR_GREY, "   That player is Offline !");
+			SendClientMessage(playerid, COLOR_GREY, "   Nguoi choi dang Offline !");
 			return 1;
 		}
 	}
